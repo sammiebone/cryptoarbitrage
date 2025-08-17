@@ -52,6 +52,23 @@ class Exchange(ABC):
     @abstractmethod
     async def close(self):
         """
-        Closes the connection to the exchange.
+        Closes the REST API connection to the exchange.
+        """
+        pass
+
+    @abstractmethod
+    async def subscribe_to_tickers(self, symbols, callback):
+        """
+        Subscribes to real-time ticker updates for a list of symbols.
+
+        :param symbols: A list of symbols to subscribe to (e.g., ['BTC/USD', 'ETH/USD']).
+        :param callback: An async function to be called with each new ticker update.
+        """
+        pass
+
+    @abstractmethod
+    async def close_websocket(self):
+        """
+        Closes the WebSocket connection.
         """
         pass

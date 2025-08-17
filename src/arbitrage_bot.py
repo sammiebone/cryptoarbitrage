@@ -9,96 +9,88 @@ from .database import get_db
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+from .market_data_handler import MarketDataHandler
+
 class ArbitrageBot:
     def __init__(self, config_path="config/config.yaml"):
         with open(config_path, "r") as f:
             self.config = yaml.safe_load(f)
 
-        self.exchanges = {}
         self.assets = self.config["assets"]
         self.min_profitability_pct = self.config["min_profitability_pct"]
         self.max_trade_size_usd = self.config["max_trade_size_usd"]
         self.dry_run = self.config.get("dry_run", True)
+
+        self.exchanges = self._initialize_exchanges()
+        self.market_data_handler = MarketDataHandler(self.exchanges, self._on_ticker_update)
+
         self.running = False
         self._log_queue = None
 
-    async def initialize(self):
+    def _initialize_exchanges(self):
+        exchanges = {}
         api_keys = self.config.get("api_keys", {})
         for name in self.config["exchanges"]:
             if "mock" in name:
-                self.exchanges[name] = MockExchange(name, self.assets)
+                exchanges[name] = MockExchange(name, self.assets)
             else:
                 keys = api_keys.get(name, {})
-                self.exchanges[name] = CEXExchange(name, keys.get("apiKey"), keys.get("secret"))
+                exchanges[name] = CEXExchange(name, keys.get("apiKey"), keys.get("secret"))
+        return exchanges
 
     def set_log_queue(self, log_queue):
         self._log_queue = log_queue
 
     async def run(self):
         self.running = True
-        self.log("Arbitrage bot started.")
+        self.log("Arbitrage bot started. Starting WebSocket subscriptions...")
+
+        # Generate the list of symbols to subscribe to
+        symbols_to_subscribe = [f"{asset}/USD" for asset in self.assets if asset != "USD"]
+        await self.market_data_handler.start_subscriptions(symbols_to_subscribe)
+
+        self.log("Bot is now running in event-driven mode. Waiting for opportunities...")
         while self.running:
-            try:
-                await self.find_and_execute_opportunities()
-                await asyncio.sleep(10) # Wait before next cycle
-            except Exception as e:
-                self.log(f"An error occurred: {e}", level="error")
-                await asyncio.sleep(30) # Wait longer after an error
+            await asyncio.sleep(1)
 
     def stop(self):
         self.running = False
         self.log("Arbitrage bot stopping...")
 
-    async def find_and_execute_opportunities(self):
-        # In a real implementation, you would check for both triangular and direct arbitrage.
-        # For simplicity, we'll focus on direct arbitrage here.
-        await self.check_direct_arbitrage()
+    async def _on_ticker_update(self, updated_exchange_name, symbol):
+        """This method is called by the MarketDataHandler on each new ticker."""
+        # When a ticker updates on one exchange, check it against all other exchanges.
+        for exchange_name, exchange in self.exchanges.items():
+            if exchange_name == updated_exchange_name:
+                continue
 
-    async def check_direct_arbitrage(self):
-        # Create all possible pairs of exchanges
-        exchange_names = list(self.exchanges.keys())
-        for i in range(len(exchange_names)):
-            for j in range(i + 1, len(exchange_names)):
-                ex1_name, ex2_name = exchange_names[i], exchange_names[j]
-                ex1 = self.exchanges[ex1_name]
-                ex2 = self.exchanges[ex2_name]
+            # Opportunity: buy on `exchange`, sell on `updated_exchange`
+            await self.evaluate_opportunity(exchange, self.exchanges[updated_exchange_name], symbol)
 
-                # Check for opportunities for each asset
-                for asset in self.assets:
-                    if asset != "USD": # Assuming USD is the quote currency
-                        symbol = f"{asset}/USD"
-                        await self.evaluate_direct_opportunity(ex1, ex2, symbol)
+            # Opportunity: buy on `updated_exchange`, sell on `exchange`
+            await self.evaluate_opportunity(self.exchanges[updated_exchange_name], exchange, symbol)
 
-    async def evaluate_direct_opportunity(self, ex1, ex2, symbol):
+    async def evaluate_opportunity(self, buy_ex, sell_ex, symbol):
+        """Evaluates a single pair of exchanges for an arbitrage opportunity."""
         try:
-            ticker1_task = ex1.get_ticker(symbol)
-            ticker2_task = ex2.get_ticker(symbol)
+            ticker_buy = self.market_data_handler.get_ticker(buy_ex.name, symbol)
+            ticker_sell = self.market_data_handler.get_ticker(sell_ex.name, symbol)
 
-            ticker1, ticker2 = await asyncio.gather(ticker1_task, ticker2_task)
+            if not ticker_buy or not ticker_sell:
+                return # Not enough data to evaluate
 
-            price1 = ticker1['ask'] # Price to buy on ex1
-            price2 = ticker2['bid'] # Price to sell on ex2
+            price_to_buy = ticker_buy['ask']
+            price_to_sell = ticker_sell['bid']
 
-            # Opportunity: Buy on ex1, Sell on ex2
-            if price2 > price1:
-                profit_pct = ((price2 - price1) / price1) * 100
+            if price_to_sell > price_to_buy:
+                profit_pct = ((price_to_sell - price_to_buy) / price_to_buy) * 100
                 if profit_pct >= self.min_profitability_pct:
-                    self.log(f"Found opportunity: Buy {symbol} on {ex1.name} at {price1}, Sell on {ex2.name} at {price2}. Profit: {profit_pct:.2f}%")
+                    self.log(f"Found opportunity: Buy {symbol} on {buy_ex.name} at {price_to_buy}, Sell on {sell_ex.name} at {price_to_sell}. Profit: {profit_pct:.2f}%")
                     if not self.dry_run:
-                        await self._execute_direct_arbitrage(ex1, ex2, symbol, price1, price2, profit_pct)
-
-            # Opportunity: Buy on ex2, Sell on ex1
-            price1_sell = ticker1['bid']
-            price2_buy = ticker2['ask']
-            if price1_sell > price2_buy:
-                 profit_pct = ((price1_sell - price2_buy) / price2_buy) * 100
-                 if profit_pct >= self.min_profitability_pct:
-                    self.log(f"Found opportunity: Buy {symbol} on {ex2.name} at {price2_buy}, Sell on {ex1.name} at {price1_sell}. Profit: {profit_pct:.2f}%")
-                    if not self.dry_run:
-                        await self._execute_direct_arbitrage(ex2, ex1, symbol, price2_buy, price1_sell, profit_pct)
+                        await self._execute_direct_arbitrage(buy_ex, sell_ex, symbol, price_to_buy, price_to_sell, profit_pct)
 
         except Exception as e:
-            self.log(f"Could not evaluate {symbol} between {ex1.name} and {ex2.name}: {e}", level="warning")
+            self.log(f"Could not evaluate {symbol} between {buy_ex.name} and {sell_ex.name}: {e}", level="warning")
 
     async def _execute_direct_arbitrage(self, buy_exchange, sell_exchange, symbol, buy_price, sell_price, profit_pct):
         """Executes a direct arbitrage trade."""
