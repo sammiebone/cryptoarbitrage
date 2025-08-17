@@ -7,9 +7,10 @@ from .cex_exchange import CEXExchange
 from .models import Trade
 from .database import get_db
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
+import ccxt
 from .market_data_handler import MarketDataHandler
+
+logger = logging.getLogger(__name__)
 
 class ArbitrageBot:
     def __init__(self, config_path="config/config.yaml"):
@@ -109,9 +110,23 @@ class ArbitrageBot:
 
             self.log(f"Attempting to execute trade: Buy {trade_size:.6f} {symbol} on {buy_exchange.name}, Sell on {sell_exchange.name}")
 
+            # To catch specific ccxt errors, we need a wrapper
+            async def safe_execute(exchange, *args):
+                try:
+                    return await exchange.execute_trade(*args)
+                except ccxt.InsufficientFunds as e:
+                    self.log(f"Insufficient funds on {exchange.name} for {args[0]}: {e}", level="error")
+                    raise e
+                except ccxt.NetworkError as e:
+                    self.log(f"Network error on {exchange.name}: {e}", level="error")
+                    raise e
+                except ccxt.ExchangeError as e:
+                    self.log(f"Exchange error on {exchange.name}: {e}", level="error")
+                    raise e
+
             # Execute trades concurrently
-            buy_order_task = buy_exchange.execute_trade(symbol, 'buy', trade_size, buy_price)
-            sell_order_task = sell_exchange.execute_trade(symbol, 'sell', trade_size, sell_price)
+            buy_order_task = safe_execute(buy_exchange, symbol, 'buy', trade_size, buy_price)
+            sell_order_task = safe_execute(sell_exchange, symbol, 'sell', trade_size, sell_price)
 
             buy_order, sell_order = await asyncio.gather(
                 buy_order_task,
@@ -142,6 +157,19 @@ class ArbitrageBot:
                 sell_order['cost'] = sell_order['amount'] * sell_order['price']
 
                 self._log_trade_to_db(buy_order, sell_order, profit_pct)
+
+            # --- FAILED TRADE RECOVERY ---
+            # Handle the case where we bought an asset but failed to sell it
+            elif buy_successful and not sell_successful:
+                self.log(f"CRITICAL: Legged trade detected! Buy on {buy_exchange.name} succeeded, but sell on {sell_exchange.name} failed.", level="error")
+                self.log(f"Attempting to sell {buy_order['amount']} of {symbol} on {buy_exchange.name} to recover.", level="warning")
+                try:
+                    # Execute a market sell order to close the position quickly
+                    recovery_order = await buy_exchange.execute_trade(symbol, 'sell', buy_order['amount'], None) # Price=None for market order
+                    self.log(f"Recovery sell order placed successfully on {buy_exchange.name}: {recovery_order.get('id', 'N/A')}", level="success")
+                except Exception as recovery_e:
+                    self.log(f"CRITICAL: Recovery sell order FAILED on {buy_exchange.name}: {recovery_e}", level="error")
+                    self.log("Manual intervention required to close open position!", level="error")
 
         except Exception as e:
             self.log(f"Error during trade execution: {e}", level="error")
@@ -176,10 +204,24 @@ class ArbitrageBot:
         return self.max_trade_size_usd / price
 
     def log(self, message, level="info"):
-        log_message = f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {message}"
-        logging.info(log_message)
+        # Central logging
+        if level == "info":
+            logger.info(message)
+        elif level == "warning":
+            logger.warning(message)
+        elif level == "error":
+            logger.error(message)
+        elif level == "success": # Custom level, treat as info
+            logger.info(message)
+
+        # UI logging via queue
         if self._log_queue:
-            self._log_queue.put_nowait(log_message)
+            log_obj = {
+                'timestamp': datetime.now().isoformat(),
+                'level': level.upper(),
+                'message': message
+            }
+            self._log_queue.put_nowait(log_obj)
 
     async def close_connections(self):
         tasks = [ex.close() for ex in self.exchanges.values()]

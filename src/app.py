@@ -54,33 +54,55 @@ from flask import session
 @app.route("/")
 @login_required
 def index():
-    # A simple dashboard page
+    # A simple dashboard page with improved logging UI
     return render_template_string("""
-        <h1>Arbitrage Bot Dashboard</h1>
-        <p>Welcome, {{ current_user.username }}!</p>
-        <p><a href="{{ url_for('setup_2fa') }}">Setup 2FA</a></p>
-        <p>Bot status: <span id="status">checking...</span></p>
-        <button onclick="startBot()">Start Bot</button>
-        <button onclick="stopBot()">Stop Bot</button>
-        <a href="{{ url_for('logout') }}">Logout</a>
-        <h2>Logs</h2>
-        <pre id="logs"></pre>
-        <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
-        <script>
-            var socket = io();
-            socket.on('log', function(msg) {
-                document.getElementById('logs').innerHTML += msg.data + '\\n';
-            });
-            function updateStatus() {
-                fetch('/api/status').then(res => res.json()).then(data => {
-                    document.getElementById('status').innerText = data.status;
+        <html>
+        <head>
+            <title>Arbitrage Bot Dashboard</title>
+            <style>
+                body { font-family: sans-serif; }
+                pre { background-color: #f4f4f4; border: 1px solid #ddd; padding: 10px; white-space: pre-wrap; word-wrap: break-word; }
+                .log-line { margin: 0; }
+                .log-INFO { color: #333; }
+                .log-SUCCESS { color: green; }
+                .log-WARNING { color: orange; }
+                .log-ERROR { color: red; font-weight: bold; }
+            </style>
+        </head>
+        <body>
+            <h1>Arbitrage Bot Dashboard</h1>
+            <p>Welcome, {{ current_user.username }}!</p>
+            <p><a href="{{ url_for('setup_2fa') }}">Setup 2FA</a></p>
+            <p>Bot status: <span id="status">checking...</span></p>
+            <button onclick="startBot()">Start Bot</button>
+            <button onclick="stopBot()">Stop Bot</button>
+            <a href="{{ url_for('logout') }}">Logout</a>
+            <h2>Logs</h2>
+            <pre id="logs"></pre>
+            <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+            <script>
+                var socket = io();
+                socket.on('log', function(log) {
+                    const logsContainer = document.getElementById('logs');
+                    const logLine = document.createElement('p');
+                    logLine.className = 'log-line log-' + log.level;
+                    const timestamp = new Date(log.timestamp).toLocaleTimeString();
+                    logLine.textContent = `[${timestamp}] [${log.level}] ${log.message}`;
+                    logsContainer.appendChild(logLine);
+                    logsContainer.scrollTop = logsContainer.scrollHeight; // Auto-scroll
                 });
-            }
-            function startBot() { fetch('/api/start', {method: 'POST'}); }
-            function stopBot() { fetch('/api/stop', {method: 'POST'}); }
-            setInterval(updateStatus, 5000);
-            updateStatus();
-        </script>
+                function updateStatus() {
+                    fetch('/api/status').then(res => res.json()).then(data => {
+                        document.getElementById('status').innerText = data.status;
+                    });
+                }
+                function startBot() { fetch('/api/start', {method: 'POST'}); }
+                function stopBot() { fetch('/api/stop', {method: 'POST'}); }
+                setInterval(updateStatus, 5000);
+                updateStatus();
+            </script>
+        </body>
+        </html>
     """)
 
 @app.route("/login", methods=["GET", "POST"])
@@ -249,11 +271,14 @@ def handle_connect():
 def log_streamer():
     while True:
         try:
-            log_message = log_queue.get(timeout=1)
-            socketio.emit('log', {'data': log_message})
+            log_obj = log_queue.get(timeout=1)
+            socketio.emit('log', log_obj)
         except queue.Empty:
             socketio.sleep(0.1)
 
+from .logging_config import setup_logging
+
 if __name__ == '__main__':
+    setup_logging()
     init_db()
     socketio.run(app, debug=True)

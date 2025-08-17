@@ -31,6 +31,11 @@ class MockExchange(Exchange):
         await asyncio.sleep(0.01)
         base_asset, quote_asset = symbol.split('/')
 
+        # If price is None, it's a market order. Use the current price.
+        if price is None:
+            ticker = await self.get_ticker(symbol)
+            price = ticker['last']
+
         if trade_type == 'buy':
             if self._balance[quote_asset] < amount * price:
                 raise ValueError("Insufficient funds")

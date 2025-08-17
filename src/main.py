@@ -2,8 +2,10 @@ import argparse
 import asyncio
 from .arbitrage_bot import ArbitrageBot
 from .models import init_db
+from .logging_config import setup_logging
 
 async def main():
+    setup_logging()
     parser = argparse.ArgumentParser(description="Cryptocurrency Arbitrage Bot")
     parser.add_argument("--config", type=str, default="config/config.yaml", help="Path to the configuration file.")
 
@@ -14,7 +16,6 @@ async def main():
 
     # Initialize and run the bot
     bot = ArbitrageBot(config_path=args.config)
-    await bot.initialize()
 
     try:
         await bot.run()

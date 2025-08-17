@@ -35,12 +35,22 @@ class CEXExchange(Exchange):
         return self._fees
 
     async def execute_trade(self, symbol, trade_type, amount, price):
-        if trade_type == 'buy':
-            order = await self._exchange.create_limit_buy_order(symbol, amount, price)
-        elif trade_type == 'sell':
-            order = await self._exchange.create_limit_sell_order(symbol, amount, price)
+        if price is not None:
+            # Limit order
+            if trade_type == 'buy':
+                order = await self._exchange.create_limit_buy_order(symbol, amount, price)
+            elif trade_type == 'sell':
+                order = await self._exchange.create_limit_sell_order(symbol, amount, price)
+            else:
+                raise ValueError(f"Invalid trade type: {trade_type}")
         else:
-            raise ValueError(f"Invalid trade type: {trade_type}")
+            # Market order
+            if trade_type == 'buy':
+                order = await self._exchange.create_market_buy_order(symbol, amount)
+            elif trade_type == 'sell':
+                order = await self._exchange.create_market_sell_order(symbol, amount)
+            else:
+                raise ValueError(f"Invalid trade type: {trade_type}")
         return order
 
     async def get_balance(self, asset):
