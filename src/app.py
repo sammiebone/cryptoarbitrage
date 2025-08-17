@@ -1,7 +1,7 @@
 import asyncio
 import threading
 import queue
-from flask import Flask, jsonify, render_template_string, request, redirect, url_for, flash
+from flask import Flask, jsonify, render_template_string, request, redirect, url_for, flash, Response
 from flask_socketio import SocketIO, emit
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from .arbitrage_bot import ArbitrageBot
@@ -71,12 +71,18 @@ def index():
         </head>
         <body>
             <h1>Arbitrage Bot Dashboard</h1>
+            <nav>
+                <a href="{{ url_for('index') }}">Live Log</a>
+                <a href="{{ url_for('history') }}">Trade History</a>
+                <a href="{{ url_for('setup_2fa') }}">2FA Setup</a>
+                <a href="{{ url_for('logout') }}">Logout</a>
+            </nav>
+            <hr>
+            <h3>Live Log</h3>
             <p>Welcome, {{ current_user.username }}!</p>
-            <p><a href="{{ url_for('setup_2fa') }}">Setup 2FA</a></p>
             <p>Bot status: <span id="status">checking...</span></p>
             <button onclick="startBot()">Start Bot</button>
             <button onclick="stopBot()">Stop Bot</button>
-            <a href="{{ url_for('logout') }}">Logout</a>
             <h2>Logs</h2>
             <pre id="logs"></pre>
             <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
@@ -100,6 +106,82 @@ def index():
                 function stopBot() { fetch('/api/stop', {method: 'POST'}); }
                 setInterval(updateStatus, 5000);
                 updateStatus();
+            </script>
+        </body>
+        </html>
+    """)
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        username = request.form["username"]
+        password = request.form["password"]
+        with get_db() as db:
+            user = db.query(User).filter_by(username=username).first()
+            if user and user.check_password(password):
+                if user.otp_enabled:
+                    # Store user ID in session and redirect to 2FA verification
+                    session['user_id_2fa'] = user.id
+                    return redirect(url_for('verify_2fa'))
+                else:
+                    login_user(user)
+                    return redirect(url_for("index"))
+            flash("Invalid username or password")
+@app.route("/history")
+@login_required
+def history():
+    return render_template_string("""
+        <html>
+        <head>
+            <title>Trade History</title>
+            <style>
+                body { font-family: sans-serif; }
+                table { border-collapse: collapse; width: 100%; }
+                th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                th { background-color: #f2f2f2; cursor: pointer; }
+                nav a { margin-right: 15px; }
+            </style>
+        </head>
+        <body>
+            <h1>Arbitrage Bot Dashboard</h1>
+            <nav>
+                <a href="{{ url_for('index') }}">Live Log</a>
+                <a href="{{ url_for('history') }}">Trade History</a>
+                <a href="{{ url_for('setup_2fa') }}">2FA Setup</a>
+                <a href="{{ url_for('logout') }}">Logout</a>
+            </nav>
+            <hr>
+            <h3>Trade History</h3>
+            <a href="/api/trades/export/csv"><button>Export as CSV</button></a>
+            <br><br>
+            <table id="history-table">
+                <thead>
+                    <tr>
+                        <th>Timestamp</th>
+                        <th>Profit (%)</th>
+                        <th>Profit ($)</th>
+                        <th>Leg 1</th>
+                        <th>Leg 2</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Data will be inserted here by JavaScript -->
+                </tbody>
+            </table>
+            <script>
+                fetch('/api/trades')
+                    .then(response => response.json())
+                    .then(data => {
+                        const tbody = document.querySelector("#history-table tbody");
+                        data.forEach(trade => {
+                            const row = tbody.insertRow();
+                            row.insertCell().textContent = new Date(trade.timestamp).toLocaleString();
+                            row.insertCell().textContent = parseFloat(trade.profitability_pct).toFixed(4);
+                            row.insertCell().textContent = parseFloat(trade.profit_or_loss).toFixed(2);
+                            row.insertCell().textContent = `${trade.asset1_amount.toFixed(4)} ${trade.asset1_symbol} on ${trade.exchange1} @ ${trade.asset1_price.toFixed(2)}`;
+                            row.insertCell().textContent = `${trade.asset2_amount.toFixed(4)} ${trade.asset2_symbol} on ${trade.exchange2} @ ${trade.asset2_price.toFixed(2)}`;
+                        });
+                    });
             </script>
         </body>
         </html>
@@ -260,6 +342,107 @@ def bot_status():
     if bot_thread and bot_thread.is_alive():
         return jsonify({"status": "running"})
     return jsonify({"status": "stopped"})
+
+@app.route("/api/trades", methods=["GET"])
+@login_required
+def get_trades():
+    with get_db() as db:
+        trades = db.query(Trade).order_by(Trade.timestamp.desc()).all()
+        # The decryption happens automatically when we access the attributes
+        trade_list = [
+            {
+                "id": trade.id,
+                "timestamp": trade.timestamp.isoformat(),
+                "opportunity_type": trade.opportunity_type,
+                "exchange1": trade.exchange1,
+                "asset1_symbol": trade.asset1_symbol,
+                "asset1_price": trade.asset1_price,
+                "asset1_amount": trade.asset1_amount,
+                "exchange2": trade.exchange2,
+                "asset2_symbol": trade.asset2_symbol,
+                "asset2_price": trade.asset2_price,
+                "asset2_amount": trade.asset2_amount,
+                "initial_investment": trade.initial_investment,
+                "final_return": trade.final_return,
+                "profit_or_loss": trade.profit_or_loss,
+                "profitability_pct": trade.profitability_pct,
+            }
+            for trade in trades
+        ]
+        return jsonify(trade_list)
+
+@app.route("/api/trades/export/csv")
+@login_required
+def export_trades_csv():
+    import csv
+    import io
+
+    with get_db() as db:
+        trades = db.query(Trade).order_by(Trade.timestamp.asc()).all()
+
+        # Use an in-memory string buffer
+        string_io = io.StringIO()
+        csv_writer = csv.writer(string_io)
+
+        # Write header
+        header = [
+            "id", "timestamp", "profitability_pct", "profit_or_loss",
+            "exchange1", "asset1_symbol", "asset1_price", "asset1_amount",
+            "exchange2", "asset2_symbol", "asset2_price", "asset2_amount"
+        ]
+        csv_writer.writerow(header)
+
+        # Write data rows
+        for trade in trades:
+            row = [
+                trade.id, trade.timestamp, trade.profitability_pct, trade.profit_or_loss,
+                trade.exchange1, trade.asset1_symbol, trade.asset1_price, trade.asset1_amount,
+                trade.exchange2, trade.asset2_symbol, trade.asset2_price, trade.asset2_amount
+            ]
+            csv_writer.writerow(row)
+
+        # Prepare response
+        output = string_io.getvalue()
+        string_io.close()
+
+        return Response(
+            output,
+            mimetype="text/csv",
+            headers={"Content-Disposition": "attachment;filename=trade_history.csv"}
+        )
+
+@app.route("/api/analytics", methods=["GET"])
+@login_required
+def get_analytics():
+    with get_db() as db:
+        trades = db.query(Trade).all()
+
+        if not trades:
+            return jsonify({
+                "total_trades": 0,
+                "total_pl": 0,
+                "win_rate": 0,
+                "avg_profit": 0,
+                "most_traded_pair": "N/A",
+            })
+
+        total_trades = len(trades)
+        total_pl = sum(trade.profit_or_loss for trade in trades)
+        wins = sum(1 for trade in trades if trade.profit_or_loss > 0)
+        win_rate = (wins / total_trades) * 100 if total_trades > 0 else 0
+        avg_profit = total_pl / total_trades if total_trades > 0 else 0
+
+        from collections import Counter
+        pair_counts = Counter(trade.asset1_symbol for trade in trades)
+        most_traded_pair = pair_counts.most_common(1)[0][0] if pair_counts else "N/A"
+
+        return jsonify({
+            "total_trades": total_trades,
+            "total_pl": round(total_pl, 2),
+            "win_rate": round(win_rate, 2),
+            "avg_profit": round(avg_profit, 4),
+            "most_traded_pair": most_traded_pair,
+        })
 
 @socketio.on('connect')
 def handle_connect():
