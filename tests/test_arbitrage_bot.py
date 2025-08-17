@@ -21,8 +21,9 @@ async def bot(request):
     test_config = {
         "exchanges": ["mock1", "mock2"],
         "assets": ["BTC", "USD"],
-        "min_profitability_pct": 1.0, # Set a specific threshold for the test
+        "min_profitability_pct": 1.0,
         "max_trade_size_usd": 100.0,
+        "slippage_tolerance_pct": 0.0, # Disable slippage for fee tests
         "dry_run": True,
         "api_keys": {}
     }
@@ -32,12 +33,6 @@ async def bot(request):
         yaml.dump(test_config, f)
 
     bot_instance = ArbitrageBot(config_path=config_path)
-
-    # Override the mock exchange price generation to create a clear opportunity
-    # mock1 will have a consistently lower price than mock2
-    original_mock1_price_fn = bot_instance.exchanges['mock1']._get_base_price
-    bot_instance.exchanges['mock1']._get_base_price = lambda symbol: 50000.0
-    bot_instance.exchanges['mock2']._get_base_price = lambda symbol: 51000.0 # 2% higher
 
     yield bot_instance
 
@@ -56,6 +51,10 @@ async def test_event_driven_opportunity_detection(bot, caplog):
     """
     caplog.set_level(logging.INFO)
 
+    # Override the mock exchange price generation to create a clear opportunity
+    bot.exchanges['mock1']._get_base_price = lambda symbol: 50000.0
+    bot.exchanges['mock2']._get_base_price = lambda symbol: 51000.0 # 2% higher
+
     # Start the bot's main loop in the background
     bot_task = asyncio.create_task(bot.run())
 
@@ -72,7 +71,40 @@ async def test_event_driven_opportunity_detection(bot, caplog):
     assert "Buy BTC/USD on mock1" in caplog.text
     assert "Sell on mock2" in caplog.text
     # The profit should be approx 2%, but can vary slightly due to mock randomness
-    assert "Profit: 1." in caplog.text or "Profit: 2." in caplog.text
+    assert "Fully-costed Profit: 1." in caplog.text
+
+@pytest.mark.asyncio
+async def test_opportunity_ignored_due_to_fees(bot, caplog):
+    """
+    Tests that an opportunity is correctly ignored if it is not profitable
+    after accounting for trading and withdrawal fees.
+    """
+    caplog.set_level(logging.INFO)
+
+    # Setup: Create a 2% price difference
+    buy_price = 50000.0
+    sell_price = 51000.0 # 2% gross profit
+
+    # Setup exchanges with high fees that will negate the profit
+    # Total trading fees = 0.5% + 0.5% = 1.0%
+    # Withdrawal fee for 1 BTC @ 51k = 0.0002 * 51000 = $10.2 (very small)
+    # Let's make trading fees the dominant factor
+    mock1 = MockExchange(name="mock1_high_fees", assets=["BTC", "USD"], trading_fee=0.005) # 0.5%
+    mock2 = MockExchange(name="mock2_high_fees", assets=["BTC", "USD"], trading_fee=0.005) # 0.5%
+
+    # Override prices
+    mock1._get_base_price = lambda symbol: buy_price
+    mock2._get_base_price = lambda symbol: sell_price
+
+    # Inject these exchanges into the bot
+    bot.exchanges = {"mock1": mock1, "mock2": mock2}
+    bot.market_data_handler.exchanges = bot.exchanges
+
+    # Manually trigger an evaluation
+    await bot.evaluate_opportunity(mock1, mock2, 'BTC/USD')
+
+    # Assert that NO opportunity was logged because fees made it unprofitable
+    assert "Found opportunity" not in caplog.text
 
 @pytest.mark.asyncio
 async def test_trade_aborted_due_to_slippage(bot, caplog):

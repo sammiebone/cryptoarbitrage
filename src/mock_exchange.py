@@ -64,11 +64,15 @@ class MockExchange(Exchange):
         await asyncio.sleep(0.01)
         return self._balance.get(asset, 0.0)
 
-    def __init__(self, name, assets):
+    def __init__(self, name, assets, trading_fee=0.001, withdrawal_fees=None):
         super().__init__(name)
         self._balance = {asset: 1000.0 for asset in assets}
         self._order_books = {}
-        self._fees = {'maker': 0.001, 'taker': 0.001} # 0.1% fee
+        self._fees = {'maker': trading_fee, 'taker': trading_fee}
+        self._withdrawal_fees = withdrawal_fees or {
+            "BTC": 0.0005,
+            "ETH": 0.005,
+        }
         self._websocket_task = None
 
     async def get_ticker(self, symbol):
@@ -142,6 +146,11 @@ class MockExchange(Exchange):
                 await self._websocket_task
             except asyncio.CancelledError:
                 pass # Expected
+
+    async def get_withdrawal_fee(self, asset_code):
+        """Returns a configurable withdrawal fee for mock testing."""
+        await asyncio.sleep(0.01) # Simulate network latency
+        return self._withdrawal_fees.get(asset_code, 0.0)
 
     def _get_base_price(self, symbol):
         # Simple deterministic prices for testing

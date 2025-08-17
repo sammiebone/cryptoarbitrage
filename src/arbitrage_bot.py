@@ -88,13 +88,36 @@ class ArbitrageBot:
             if not ticker_buy or not ticker_sell:
                 return # Not enough data to evaluate
 
+            # --- Fee-Aware Profit Calculation ---
+            fees_buy = await buy_ex.get_fees()
+            fees_sell = await sell_ex.get_fees()
+
+            buy_fee = fees_buy.get('taker', 0.002) # Default to 0.2% if not found
+            sell_fee = fees_sell.get('taker', 0.002)
+
             price_to_buy = ticker_buy['ask']
             price_to_sell = ticker_sell['bid']
 
-            if price_to_sell > price_to_buy:
-                profit_pct = ((price_to_sell - price_to_buy) / price_to_buy) * 100
+            # The actual amount of quote currency we get after selling
+            # e.g., (1 / buy_price) BTC * (1 - buy_fee) = amount_of_btc_received
+            # then, amount_of_btc_received * sell_price * (1 - sell_fee) = final_usd
+            # Simplified: final_amount = initial_amount * (sell_price/buy_price) * (1-buy_fee) * (1-sell_fee)
+
+            effective_sell_price = price_to_sell * (1 - sell_fee)
+            # Incorporate withdrawal fee
+            base_asset, quote_asset = symbol.split('/')
+            withdrawal_fee = await sell_ex.get_withdrawal_fee(base_asset)
+
+            # Subtract withdrawal fee (converted to quote currency) from the sell price
+            effective_sell_price -= (withdrawal_fee * price_to_sell)
+
+            effective_buy_price = price_to_buy / (1 - buy_fee)
+
+            if effective_sell_price > effective_buy_price:
+                profit_pct = ((effective_sell_price - effective_buy_price) / effective_buy_price) * 100
+
                 if profit_pct >= self.min_profitability_pct:
-                    self.log(f"Found opportunity: Buy {symbol} on {buy_ex.name} at {price_to_buy}, Sell on {sell_ex.name} at {price_to_sell}. Profit: {profit_pct:.2f}%")
+                    self.log(f"Found opportunity: Buy {symbol} on {buy_ex.name} at {price_to_buy}, Sell on {sell_ex.name} at {price_to_sell}. Fully-costed Profit: {profit_pct:.2f}%")
                     if not self.dry_run:
                         await self._execute_direct_arbitrage(buy_ex, sell_ex, symbol, price_to_buy, price_to_sell, profit_pct)
                     else:

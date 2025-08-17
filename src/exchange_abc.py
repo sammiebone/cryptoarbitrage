@@ -72,3 +72,13 @@ class Exchange(ABC):
         Closes the WebSocket connection.
         """
         pass
+
+    @abstractmethod
+    async def get_withdrawal_fee(self, asset_code):
+        """
+        Fetches the withdrawal fee for a specific asset.
+
+        :param asset_code: The code for the asset (e.g., 'BTC').
+        :return: The withdrawal fee as a float.
+        """
+        pass

@@ -130,3 +130,14 @@ class CEXExchange(Exchange):
                 pass # Expected
         # Also close the underlying ccxt exchange connection, which handles websockets
         await self.close()
+
+    async def get_withdrawal_fee(self, asset_code):
+        # This can be slow, so caching is important in a real application
+        try:
+            fees = await self._exchange.fetch_deposit_withdraw_fees()
+            if asset_code in fees and 'withdraw' in fees[asset_code]:
+                return fees[asset_code]['withdraw']['fee']
+        except Exception as e:
+            # Not all exchanges support this method uniformly
+            print(f"Could not fetch withdrawal fees for {self.name}: {e}")
+        return 0.0 # Default to 0 if not available
