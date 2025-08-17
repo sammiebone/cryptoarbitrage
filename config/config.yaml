@@ -12,6 +12,7 @@ assets:
   - USD
 
 # Risk management settings
+dry_run: true # If true, bot will log trades but not execute them.
 min_profitability_pct: 0.1 # Minimum profitability to execute a trade
 max_trade_size_usd: 100 # Maximum trade size in USD
 

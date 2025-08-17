@@ -20,6 +20,7 @@ async def bot(request):
         "exchanges": ["mock1", "mock2"],
         "assets": ["BTC", "ETH", "USD"],
         "min_profitability_pct": 0.5,
+        "max_trade_size_usd": 100.0,
         "api_keys": {}
     }
 
@@ -71,7 +72,7 @@ async def test_direct_arbitrage_opportunity(bot, caplog):
     assert "Sell on mock2" in caplog.text
 
 @pytest.mark.asyncio
-async def test_no_arbitrage_opportunity(bot, capsys):
+async def test_no_arbitrage_opportunity(bot, caplog):
     """Test that the bot does not flag an opportunity when none exists."""
 
     # Set prices to be the same
@@ -80,5 +81,40 @@ async def test_no_arbitrage_opportunity(bot, capsys):
 
     await bot.check_direct_arbitrage()
 
-    captured = capsys.readouterr()
-    assert "Found opportunity" not in captured.out
+    assert "Found opportunity" not in caplog.text
+
+@pytest.mark.asyncio
+async def test_trade_execution_updates_balance(bot):
+    """Test that executing a trade correctly updates the mock balances."""
+    # Setup
+    mock1 = bot.exchanges["mock1"]
+    mock2 = bot.exchanges["mock2"]
+    symbol = "BTC/USD"
+    buy_price = 50000.0
+    sell_price = 51000.0
+    profit_pct = ((sell_price - buy_price) / buy_price) * 100
+
+    # Get initial balances
+    initial_mock1_btc = await mock1.get_balance("BTC")
+    initial_mock1_usd = await mock1.get_balance("USD")
+    initial_mock2_btc = await mock2.get_balance("BTC")
+    initial_mock2_usd = await mock2.get_balance("USD")
+
+    # Execute the trade
+    await bot._execute_direct_arbitrage(mock1, mock2, symbol, buy_price, sell_price, profit_pct)
+
+    # Calculate expected changes
+    trade_size_btc = bot.max_trade_size_usd / buy_price
+    fee = mock1._fees['taker']
+
+    # Check mock1 (bought BTC)
+    expected_mock1_btc = initial_mock1_btc + (trade_size_btc * (1 - fee))
+    expected_mock1_usd = initial_mock1_usd - (trade_size_btc * buy_price)
+    assert await mock1.get_balance("BTC") == pytest.approx(expected_mock1_btc)
+    assert await mock1.get_balance("USD") == pytest.approx(expected_mock1_usd)
+
+    # Check mock2 (sold BTC)
+    expected_mock2_btc = initial_mock2_btc - trade_size_btc
+    expected_mock2_usd = initial_mock2_usd + (trade_size_btc * sell_price * (1 - fee))
+    assert await mock2.get_balance("BTC") == pytest.approx(expected_mock2_btc)
+    assert await mock2.get_balance("USD") == pytest.approx(expected_mock2_usd)
