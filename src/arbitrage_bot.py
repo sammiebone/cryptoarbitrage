@@ -9,6 +9,7 @@ from .database import get_db
 
 import ccxt
 from .market_data_handler import MarketDataHandler
+from .order_book_utils import calculate_effective_price
 
 logger = logging.getLogger(__name__)
 
@@ -82,11 +83,17 @@ class ArbitrageBot:
     async def evaluate_opportunity(self, buy_ex, sell_ex, symbol):
         """Evaluates a single pair of exchanges for an arbitrage opportunity."""
         try:
-            ticker_buy = self.market_data_handler.get_ticker(buy_ex.name, symbol)
-            ticker_sell = self.market_data_handler.get_ticker(sell_ex.name, symbol)
+            # For liquidity assessment, we need the full order book
+            order_book_buy_task = buy_ex.get_order_book(symbol)
+            order_book_sell_task = sell_ex.get_order_book(symbol)
 
-            if not ticker_buy or not ticker_sell:
-                return # Not enough data to evaluate
+            order_book_buy, order_book_sell = await asyncio.gather(
+                order_book_buy_task,
+                order_book_sell_task
+            )
+
+            if not order_book_buy or not order_book_sell:
+                return # Not enough data
 
             # --- Fee-Aware Profit Calculation ---
             fees_buy = await buy_ex.get_fees()
@@ -95,8 +102,19 @@ class ArbitrageBot:
             buy_fee = fees_buy.get('taker', 0.002) # Default to 0.2% if not found
             sell_fee = fees_sell.get('taker', 0.002)
 
-            price_to_buy = ticker_buy['ask']
-            price_to_sell = ticker_sell['bid']
+            # Determine trade size based on the top-of-book ask price
+            top_ask_price = order_book_buy['asks'][0][0] if order_book_buy['asks'] else 0
+            trade_size = self._calculate_trade_size(top_ask_price)
+            if trade_size == 0:
+                return # Can't determine trade size
+
+            # Calculate the real, liquidity-adjusted prices
+            price_to_buy = calculate_effective_price(order_book_buy['asks'], trade_size)
+            price_to_sell = calculate_effective_price(order_book_sell['bids'], trade_size)
+
+            if not price_to_buy or not price_to_sell:
+                self.log(f"Insufficient liquidity on {buy_ex.name} or {sell_ex.name} for a trade of {trade_size:.4f} {symbol.split('/')[0]}.", level="warning")
+                return
 
             # The actual amount of quote currency we get after selling
             # e.g., (1 / buy_price) BTC * (1 - buy_fee) = amount_of_btc_received

@@ -74,6 +74,40 @@ async def test_event_driven_opportunity_detection(bot, caplog):
     assert "Fully-costed Profit: 1." in caplog.text
 
 @pytest.mark.asyncio
+async def test_opportunity_ignored_due_to_liquidity(bot, caplog):
+    """
+    Tests that an opportunity is correctly ignored if there is not enough
+    liquidity in the order book to fill the desired trade size.
+    """
+    caplog.set_level(logging.INFO)
+
+    # Setup a thin order book on the buy exchange
+    thin_order_book = {
+        'bids': [[49999, 10]], # Deep bids
+        'asks': [
+            [50000.0, 0.001],  # Top-level ask, but very low volume (0.001 BTC)
+            [52000.0, 10.0]    # Next level is much more expensive
+        ]
+    }
+    # Setup a deep order book on the sell exchange
+    deep_order_book = {
+        'bids': [[50500.0, 10.0]], # Profitable sell price with plenty of volume
+        'asks': [[50501.0, 10.0]]
+    }
+
+    # Override the get_order_book methods of the mock exchanges
+    bot.exchanges['mock1'].get_order_book = lambda symbol, limit=100: asyncio.sleep(0, result=thin_order_book)
+    bot.exchanges['mock2'].get_order_book = lambda symbol, limit=100: asyncio.sleep(0, result=deep_order_book)
+
+    # Manually trigger an evaluation. The bot will want to trade $100 worth.
+    # $100 / $50000 = 0.002 BTC. The thin book only has 0.001 BTC.
+    await bot.evaluate_opportunity(bot.exchanges['mock1'], bot.exchanges['mock2'], 'BTC/USD')
+
+    # Assert that no opportunity was found because the effective price after
+    # walking the thin order book makes the trade unprofitable.
+    assert "Found opportunity" not in caplog.text
+
+@pytest.mark.asyncio
 async def test_opportunity_ignored_due_to_fees(bot, caplog):
     """
     Tests that an opportunity is correctly ignored if it is not profitable
