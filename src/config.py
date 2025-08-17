@@ -1,9 +1,12 @@
 import yaml
 from pathlib import Path
+from dotenv import load_dotenv
 
 DEFAULT_CONFIG_PATH = Path("config/config.yaml")
 
 def load_config(path: Path = DEFAULT_CONFIG_PATH) -> dict:
+    # Load environment variables from .env file
+    load_dotenv()
     """
     Loads the YAML configuration file.
 
