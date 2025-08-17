@@ -129,57 +129,59 @@ def check_trade_safety(
     opportunity: Dict,
     exchanges: List[Exchange],
     config: Dict
-) -> Tuple[bool, float, Optional[Exchange]]:
+) -> Tuple[bool, float, Dict[str, Optional[Exchange]]]:
     """
     Performs risk management checks for a given arbitrage opportunity.
+    Returns the trade size and a dictionary of the exchanges involved.
     """
     min_profit = config['risk']['min_profitability_percentage']
 
-    # Initial check based on ticker prices (gross profit)
     if opportunity['profit_percentage'] < min_profit:
-        return False, 0.0, None
+        return False, 0.0, {}
 
     trade_size = 0.0
-    exchange_for_trade = None
+    exchanges_for_trade = {}
     opp_type = opportunity.get('type')
 
-    # Determine trade size and primary exchange
     if opp_type == 'triangular':
         exchange_name = opportunity.get('exchange')
         exchange = next((ex for ex in exchanges if ex.name == exchange_name), None)
-        if not exchange: return False, 0.0, None
+        if not exchange: return False, 0.0, {}
 
         start_currency = opportunity['path'].split(' -> ')[0]
         balance = exchange.get_balance(start_currency)
         trade_size = balance * config['trading']['trade_size_percentage']
-        exchange_for_trade = exchange
+        exchanges_for_trade['triangular'] = exchange
 
     elif opp_type == 'direct':
         symbol = opportunity['symbol']
         _, quote_currency = symbol.split('/')
         buy_exchange_name = opportunity['buy_exchange']
-        buy_exchange = next((ex for ex in exchanges if ex.name == buy_exchange_name), None)
-        if not buy_exchange: return False, 0.0, None
+        sell_exchange_name = opportunity['sell_exchange']
 
+        buy_exchange = next((ex for ex in exchanges if ex.name == buy_exchange_name), None)
+        sell_exchange = next((ex for ex in exchanges if ex.name == sell_exchange_name), None)
+
+        if not buy_exchange or not sell_exchange: return False, 0.0, {}
+
+        # For direct arbitrage, the trade size is determined by the balance on the BUYING exchange.
         balance = buy_exchange.get_balance(quote_currency)
         trade_size = balance * config['trading']['trade_size_percentage']
-        # For direct, we pass None for the single exchange, as two are involved.
-        exchange_for_trade = None
+        exchanges_for_trade['buy'] = buy_exchange
+        exchanges_for_trade['sell'] = sell_exchange
 
     if trade_size <= 0:
-        return False, 0.0, None
+        return False, 0.0, {}
 
     # --- Secondary validation with slippage and all fees ---
     print(f"[RiskManager] INFO: Performing detailed validation for {opp_type} opportunity...")
 
-    # For triangular, pass only the relevant exchange
-    relevant_exchanges = [exchange_for_trade] if opp_type == 'triangular' else exchanges
-    net_profit = _calculate_net_profit(opportunity, relevant_exchanges, trade_size)
+    net_profit = _calculate_net_profit(opportunity, exchanges, trade_size)
 
     if net_profit is not None and net_profit > min_profit:
-        opportunity['profit_percentage'] = net_profit # Update with the accurate profit
+        opportunity['profit_percentage'] = net_profit
         print(f"[RiskManager] PASSED: Net profit after all costs: {net_profit:.4f}%")
-        return True, trade_size, exchange_for_trade
+        return True, trade_size, exchanges_for_trade
     else:
         print(f"[RiskManager] FAILED: Opportunity not profitable after detailed check. Net profit: {net_profit or 'N/A'}")
-        return False, 0.0, None
+        return False, 0.0, {}

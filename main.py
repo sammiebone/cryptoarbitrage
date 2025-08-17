@@ -40,10 +40,10 @@ def run(config_path):
             if opportunities:
                 print(f"\nFound {len(opportunities)} total opportunities. Evaluating...")
                 for opp in opportunities:
-                    is_safe, trade_size, exchange_for_trade = check_trade_safety(opp, exchanges, config)
+                    is_safe, trade_size, exchanges_for_trade = check_trade_safety(opp, exchanges, config)
 
                     if is_safe:
-                        execute_arbitrage(opp, exchange_for_trade, config, trade_size)
+                        execute_arbitrage(opp, exchanges_for_trade, config, trade_size)
             else:
                 print("No opportunities found in this cycle.")
 
