@@ -73,3 +73,37 @@ async def test_event_driven_opportunity_detection(bot, caplog):
     assert "Sell on mock2" in caplog.text
     # The profit should be approx 2%, but can vary slightly due to mock randomness
     assert "Profit: 1." in caplog.text or "Profit: 2." in caplog.text
+
+@pytest.mark.asyncio
+async def test_trade_aborted_due_to_slippage(bot, caplog):
+    """
+    Tests that a trade is correctly aborted if the slippage tolerance
+    makes the opportunity unprofitable.
+    """
+    caplog.set_level(logging.INFO)
+
+    # Disable dry run for this test to check execution logic
+    bot.dry_run = False
+
+    # Set slippage tolerance high enough to wipe out the profit
+    bot.slippage_tolerance_pct = 0.2
+    bot.min_profitability_pct = 0.1 # Profit must be >= 0.1%
+
+    # Get initial balances to confirm they don't change
+    initial_balance = await bot.exchanges['mock1'].get_balance("USD")
+
+    # Manually call the execution method with a trade that is profitable
+    # *before* slippage, but not after.
+    await bot._execute_direct_arbitrage(
+        bot.exchanges['mock1'],
+        bot.exchanges['mock2'],
+        'BTC/USD',
+        buy_price=50000.0,
+        sell_price=50050.0, # 0.1% profit, which meets the min requirement
+        profit_pct=0.1
+    )
+
+    # Check that the trade was aborted and balances are unchanged
+    assert "Trade aborted" in caplog.text
+    final_balance = await bot.exchanges['mock1'].get_balance("USD")
+    assert final_balance == initial_balance

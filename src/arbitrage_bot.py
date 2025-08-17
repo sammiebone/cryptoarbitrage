@@ -20,6 +20,7 @@ class ArbitrageBot:
         self.assets = self.config["assets"]
         self.min_profitability_pct = self.config["min_profitability_pct"]
         self.max_trade_size_usd = self.config["max_trade_size_usd"]
+        self.slippage_tolerance_pct = self.config.get("slippage_tolerance_pct", 0.05)
         self.dry_run = self.config.get("dry_run", True)
 
         self.exchanges = self._initialize_exchanges()
@@ -96,13 +97,29 @@ class ArbitrageBot:
                     self.log(f"Found opportunity: Buy {symbol} on {buy_ex.name} at {price_to_buy}, Sell on {sell_ex.name} at {price_to_sell}. Profit: {profit_pct:.2f}%")
                     if not self.dry_run:
                         await self._execute_direct_arbitrage(buy_ex, sell_ex, symbol, price_to_buy, price_to_sell, profit_pct)
+                    else:
+                        self.log("Dry run mode is enabled. No trade will be executed.", level="info")
 
         except Exception as e:
             self.log(f"Could not evaluate {symbol} between {buy_ex.name} and {sell_ex.name}: {e}", level="warning")
 
     async def _execute_direct_arbitrage(self, buy_exchange, sell_exchange, symbol, buy_price, sell_price, profit_pct):
-        """Executes a direct arbitrage trade."""
+        """Executes a direct arbitrage trade, including pre-trade checks."""
         try:
+            # --- Pre-Trade Slippage and Profitability Check ---
+            slippage_factor = self.slippage_tolerance_pct / 100.0
+            adjusted_buy_price = buy_price * (1 + slippage_factor)
+            adjusted_sell_price = sell_price * (1 - slippage_factor)
+
+            adjusted_profit_pct = ((adjusted_sell_price - adjusted_buy_price) / adjusted_buy_price) * 100
+
+            if adjusted_profit_pct < self.min_profitability_pct:
+                self.log(
+                    f"Trade aborted. Slippage-adjusted profit ({adjusted_profit_pct:.2f}%) is below minimum ({self.min_profitability_pct:.2f}%).",
+                    level="warning"
+                )
+                return
+
             trade_size = self._calculate_trade_size(buy_price)
             if trade_size == 0:
                 self.log("Skipping trade due to zero trade size.", level="warning")
@@ -124,9 +141,9 @@ class ArbitrageBot:
                     self.log(f"Exchange error on {exchange.name}: {e}", level="error")
                     raise e
 
-            # Execute trades concurrently
-            buy_order_task = safe_execute(buy_exchange, symbol, 'buy', trade_size, buy_price)
-            sell_order_task = safe_execute(sell_exchange, symbol, 'sell', trade_size, sell_price)
+            # Execute trades concurrently with adjusted prices
+            buy_order_task = safe_execute(buy_exchange, symbol, 'buy', trade_size, adjusted_buy_price)
+            sell_order_task = safe_execute(sell_exchange, symbol, 'sell', trade_size, adjusted_sell_price)
 
             buy_order, sell_order = await asyncio.gather(
                 buy_order_task,
