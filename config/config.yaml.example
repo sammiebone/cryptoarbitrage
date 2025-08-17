@@ -1,0 +1,41 @@
+# Automated Crypto Arbitrage Service Configuration
+#
+# How to use:
+# 1. Make a copy of this file named `config.yaml` in the same directory.
+# 2. Replace the placeholder values with your actual data.
+#
+# DO NOT commit your `config.yaml` file to version control.
+
+# Exchange API credentials
+# Add your exchange API keys and secrets here.
+# The service will only use exchanges that have credentials provided.
+exchanges:
+  binance:
+    api_key: "YOUR_BINANCE_API_KEY"
+    api_secret: "YOUR_BINANCE_API_SECRET"
+  kraken:
+    api_key: "YOUR_KRAKEN_API_KEY"
+    api_secret: "YOUR_KRAKEN_API_SECRET"
+
+# Trading parameters
+trading:
+  # The base currency to calculate total portfolio value and profits.
+  # e.g., USDT, USD, EUR
+  base_currency: "USDT"
+
+  # The maximum percentage of your base currency balance to use in a single arbitrage trade.
+  # Example: 0.1 means use up to 10% of your available USDT for a trade.
+  trade_size_percentage: 0.1
+
+# Risk Management
+risk:
+  # The minimum expected profit percentage to trigger a trade.
+  # This should be higher than the combined trading fees of the exchanges.
+  # Example: 0.002 means a 0.2% profit is required.
+  min_profitability_percentage: 0.002
+
+# Application settings
+app:
+  # Set to true to simulate trades without using real funds.
+  # It is HIGHLY recommended to run in dry_run mode for a while before going live.
+  dry_run: true
