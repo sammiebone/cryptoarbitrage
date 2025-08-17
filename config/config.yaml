@@ -25,3 +25,13 @@ database_url: "sqlite:///trades.db"
 
 # API keys for real exchanges are now loaded from environment variables.
 # See SECURITY.md for instructions on how to set them.
+
+# Configuration for Decentralized Exchanges (DEXs)
+# Note: Requires a PRIVATE_KEY environment variable to be set.
+dexs:
+  uniswap_v2:
+    rpc_url: "https://mainnet.infura.io/v3/YOUR_INFURA_PROJECT_ID" # Replace with your node provider URL
+    chain_id: 1 # 1 for Ethereum Mainnet
+    router_address: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
+    # A simplified ABI for getting prices and swapping
+    router_abi: '[{"constant":true,"inputs":[{"name":"_factory","type":"address"}],"name":"WETH","outputs":[{"name":"","type":"address"}],"payable":false,"stateMutability":"pure","type":"function"},{"constant":true,"inputs":[{"name":"tokenA","type":"address"},{"name":"tokenB","type":"address"}],"name":"pairFor","outputs":[{"name":"pair","type":"address"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":true,"inputs":[{"name":"amountOut","type":"uint256"},{"name":"reserveIn","type":"uint256"},{"name":"reserveOut","type":"uint256"}],"name":"getAmountIn","outputs":[{"name":"amountIn","type":"uint256"}],"payable":false,"stateMutability":"pure","type":"function"},{"constant":true,"inputs":[{"name":"amountIn","type":"uint256"},{"name":"reserveIn","type":"uint256"},{"name":"reserveOut","type":"uint256"}],"name":"getAmountOut","outputs":[{"name":"amountOut","type":"uint256"}],"payable":false,"stateMutability":"pure","type":"function"},{"constant":false,"inputs":[{"name":"amountOutMin","type":"uint256"},{"name":"path","type":"address[]"},{"name":"to","type":"address"},{"name":"deadline","type":"uint256"}],"name":"swapExactETHForTokens","outputs":[{"name":"amounts","type":"uint256[]"}],"payable":true,"stateMutability":"payable","type":"function"},{"constant":false,"inputs":[{"name":"amountIn","type":"uint256"},{"name":"amountOutMin","type":"uint256"},{"name":"path","type":"address[]"},{"name":"to","type":"address"},{"name":"deadline","type":"uint256"}],"name":"swapExactTokensForTokens","outputs":[{"name":"amounts","type":"uint256[]"}],"payable":false,"stateMutability":"nonpayable","type":"function"}]'

@@ -10,6 +10,8 @@ from .database import get_db
 import ccxt
 from .market_data_handler import MarketDataHandler
 from .order_book_utils import calculate_effective_price
+from .dex_exchange import DEXExchange
+from .gas_oracle import GasFeeOracle
 
 logger = logging.getLogger(__name__)
 
@@ -27,23 +29,46 @@ class ArbitrageBot:
         self.exchanges = self._initialize_exchanges()
         self.market_data_handler = MarketDataHandler(self.exchanges, self._on_ticker_update)
 
+        # Initialize the Gas Fee Oracle if a DEX is present
+        self.gas_oracle = None
+        first_dex = next((ex for ex in self.exchanges.values() if isinstance(ex, DEXExchange)), None)
+        first_cex = next((ex for ex in self.exchanges.values() if isinstance(ex, CEXExchange)), None)
+        if first_dex and first_cex:
+            self.gas_oracle = GasFeeOracle(first_dex.w3, first_cex)
+            self.log("GasFeeOracle initialized.")
+
         self.running = False
         self._log_queue = None
 
     def _initialize_exchanges(self):
         exchanges = {}
         import os
+
+        dex_configs = self.config.get('dexs', {})
+
         for name in self.config["exchanges"]:
-            if "mock" in name:
+            if name in dex_configs:
+                try:
+                    config = dex_configs[name]
+                    exchanges[name] = DEXExchange(
+                        name,
+                        rpc_url=config['rpc_url'],
+                        chain_id=config['chain_id'],
+                        router_address=config['router_address'],
+                        router_abi=config['router_abi']
+                    )
+                    self.log(f"Initialized DEX: {name}")
+                except Exception as e:
+                    self.log(f"Failed to initialize DEX {name}: {e}", level="error")
+            elif "mock" in name:
                 exchanges[name] = MockExchange(name, self.assets)
             else:
-                # Load API keys from environment variables
-                # Convention: {EXCHANGE_NAME}_API_KEY and {EXCHANGE_NAME}_SECRET
+                # CEX Exchange
                 api_key = os.environ.get(f"{name.upper()}_API_KEY")
                 secret = os.environ.get(f"{name.upper()}_SECRET")
 
                 if not api_key or not secret:
-                    self.log(f"API key/secret for {name} not found in environment variables. Running in public mode.", level="warning")
+                    self.log(f"API key/secret for CEX {name} not found in environment variables. Will run in public mode.", level="warning")
 
                 exchanges[name] = CEXExchange(name, api_key, secret)
         return exchanges
@@ -131,15 +156,26 @@ class ArbitrageBot:
 
             effective_buy_price = price_to_buy / (1 - buy_fee)
 
-            if effective_sell_price > effective_buy_price:
-                profit_pct = ((effective_sell_price - effective_buy_price) / effective_buy_price) * 100
+            # --- Gas Fee Calculation (if a DEX is involved) ---
+            gas_fee_usd = 0
+            if self.gas_oracle and (isinstance(buy_ex, DEXExchange) or isinstance(sell_ex, DEXExchange)):
+                estimated_fee = await self.gas_oracle.estimate_swap_fee_in_usd()
+                if estimated_fee is not None:
+                    gas_fee_usd = estimated_fee
+                else:
+                    self.log("Could not estimate gas fee, aborting DEX opportunity.", level="warning")
+                    return
 
-                if profit_pct >= self.min_profitability_pct:
-                    self.log(f"Found opportunity: Buy {symbol} on {buy_ex.name} at {price_to_buy}, Sell on {sell_ex.name} at {price_to_sell}. Fully-costed Profit: {profit_pct:.2f}%")
-                    if not self.dry_run:
-                        await self._execute_direct_arbitrage(buy_ex, sell_ex, symbol, price_to_buy, price_to_sell, profit_pct)
-                    else:
-                        self.log("Dry run mode is enabled. No trade will be executed.", level="info")
+            # Final profit calculation in USD for a trade of max size
+            profit_usd = (effective_sell_price - effective_buy_price) * trade_size - gas_fee_usd
+            profit_pct = (profit_usd / (effective_buy_price * trade_size)) * 100
+
+            if profit_pct >= self.min_profitability_pct:
+                self.log(f"Found opportunity: Buy {symbol} on {buy_ex.name}, Sell on {sell_ex.name}. Fully-costed Profit: {profit_pct:.2f}% (${profit_usd:.2f})")
+                if not self.dry_run:
+                    await self._execute_direct_arbitrage(buy_ex, sell_ex, symbol, price_to_buy, price_to_sell, profit_pct)
+                else:
+                    self.log("Dry run mode is enabled. No trade will be executed.", level="info")
 
         except Exception as e:
             self.log(f"Could not evaluate {symbol} between {buy_ex.name} and {sell_ex.name}: {e}", level="warning")

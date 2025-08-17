@@ -79,7 +79,25 @@ This software has not yet undergone a professional, third-party security audit o
 
 By running this software, you acknowledge that you understand these security principles and accept responsibility for the secure configuration and operation of the bot.
 
-## 6. Regulatory Compliance
+## 7. Private Key for DEX Trading
+
+**WARNING: The private key gives complete control over all assets in that wallet. Handle it with extreme care. Never commit it to version control or share it with anyone.**
+
+To interact with Decentralized Exchanges (DEXs), the application needs a private key to sign transactions. This key should be for a "hot wallet" that only contains the funds you are actively trading with.
+
+The application loads the private key from the `PRIVATE_KEY` environment variable.
+
+**On Linux/macOS:**
+```bash
+export PRIVATE_KEY="your_wallet_private_key_without_0x_prefix"
+```
+
+**On Windows:**
+```powershell
+$env:PRIVATE_KEY="your_wallet_private_key_without_0x_prefix"
+```
+
+## 8. Regulatory Compliance
 
 While the bot has been designed with security in mind, you must also be aware of the regulatory landscape.
 
