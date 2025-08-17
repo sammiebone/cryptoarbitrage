@@ -1,0 +1,14 @@
+{
+  "name": "dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "socket.io-client": "^4.5.4"
+  },
+  "scripts": {
+    "start": "echo 'This project is not set up to be run with a dev server. Serve the build folder instead.'",
+    "build": "echo 'Build step not implemented.'"
+  }
+}
