@@ -70,3 +70,13 @@ class Exchange(ABC):
             The available balance as a float.
         """
         pass
+
+    @abstractmethod
+    def get_symbols(self) -> list[str]:
+        """
+        Retrieves a list of all available trading symbols from the exchange.
+
+        Returns:
+            A list of strings, where each string is a symbol (e.g., 'BTC/USDT').
+        """
+        pass

@@ -3,20 +3,102 @@ from typing import List, Dict, Optional
 from .exchange_abc import Exchange
 
 
+def find_all_opportunities(exchanges: List[Exchange]) -> List[Dict]:
+    """
+    The main function to find all types of arbitrage opportunities.
+    """
+    all_opportunities = []
+
+    # 1. Find triangular arbitrage on each exchange individually
+    print("\n--- Searching for Triangular Arbitrage Opportunities ---")
+    for exchange in exchanges:
+        try:
+            symbols = exchange.get_symbols()
+            if not symbols:
+                print(f"No symbols found for {exchange.name}, skipping triangular scan.")
+                continue
+
+            tri_opps = find_triangular_arbitrage(exchange, symbols)
+            if tri_opps:
+                for opp in tri_opps:
+                    opp['exchange'] = exchange.name
+                    opp['type'] = 'triangular'
+                all_opportunities.extend(tri_opps)
+        except Exception as e:
+            print(f"Could not run triangular arbitrage scan on {exchange.name}: {e}")
+
+    # 2. Find direct arbitrage across all exchanges
+    print("\n--- Searching for Direct Arbitrage Opportunities ---")
+    direct_opps = find_direct_arbitrage(exchanges)
+    if direct_opps:
+        all_opportunities.extend(direct_opps)
+
+    return all_opportunities
+
+
+def find_direct_arbitrage(exchanges: List[Exchange]) -> List[Dict]:
+    """
+    Finds direct arbitrage opportunities across a list of exchanges.
+    """
+    all_tickers = {}
+    for exchange in exchanges:
+        try:
+            symbols = exchange.get_symbols()
+            for symbol in symbols:
+                if symbol not in all_tickers:
+                    all_tickers[symbol] = []
+
+                try:
+                    ticker = exchange.get_ticker(symbol)
+                    if ticker and ticker.get('ask') and ticker.get('bid'):
+                        all_tickers[symbol].append({"exchange": exchange, "ticker": ticker})
+                except Exception:
+                    continue
+        except Exception as e:
+            print(f"Could not fetch symbols/tickers for {exchange.name}: {e}")
+            continue
+
+    opportunities = []
+    for symbol, exchange_tickers in all_tickers.items():
+        if len(exchange_tickers) < 2:
+            continue
+
+        lowest_ask_item = min(exchange_tickers, key=lambda x: x['ticker']['ask'])
+        highest_bid_item = max(exchange_tickers, key=lambda x: x['ticker']['bid'])
+
+        buy_price = lowest_ask_item['ticker']['ask']
+        sell_price = highest_bid_item['ticker']['bid']
+        buy_exchange = lowest_ask_item['exchange']
+        sell_exchange = highest_bid_item['exchange']
+
+        if buy_exchange.name == sell_exchange.name:
+            continue
+
+        if sell_price > buy_price:
+            profit_percentage = ((sell_price / buy_price) - 1) * 100
+
+            # TODO: Incorporate trading and transfer fees for accurate profit calculation.
+            if profit_percentage > 0:
+                opportunity = {
+                    "type": "direct",
+                    "symbol": symbol,
+                    "profit_percentage": profit_percentage,
+                    "buy_exchange": buy_exchange.name,
+                    "sell_exchange": sell_exchange.name,
+                    "buy_price": buy_price,
+                    "sell_price": sell_price,
+                }
+                opportunities.append(opportunity)
+                print(f"Found direct opportunity: {opportunity}")
+
+    return opportunities
+
+
 def find_triangular_arbitrage(exchange: Exchange, symbols: List[str]) -> Optional[List[Dict]]:
     """
     Finds triangular arbitrage opportunities on a given exchange.
-
-    Args:
-        exchange: An instance of an exchange connector.
-        symbols: A list of all available trading symbols on the exchange.
-
-    Returns:
-        A list of dictionaries, where each dictionary represents a profitable
-        arbitrage opportunity. Returns an empty list if no opportunities are found.
+    (This function is kept from the previous implementation)
     """
-    print(f"[{exchange.name}] Searching for triangular arbitrage opportunities...")
-
     markets = _structure_markets(symbols)
     currencies = list(markets.keys())
 
@@ -45,7 +127,7 @@ def find_triangular_arbitrage(exchange: Exchange, symbols: List[str]) -> Optiona
                             "profit_percentage": profit_percentage,
                         }
                         opportunities.append(opportunity)
-                        print(f"Found profitable opportunity: {opportunity}")
+                        print(f"Found triangular opportunity: {opportunity}")
 
     return opportunities
 
@@ -72,8 +154,6 @@ def _calculate_path_profitability(exchange: Exchange, path: List[str], symbols: 
     """
     Calculates the profitability of a given arbitrage path.
     """
-    # TODO: Factor in trading fees for a more accurate calculation.
-
     try:
         ticker1 = exchange.get_ticker(symbols[0])
         ticker2 = exchange.get_ticker(symbols[1])
@@ -85,21 +165,18 @@ def _calculate_path_profitability(exchange: Exchange, path: List[str], symbols: 
     initial_amount = 1.0
     amount_a = initial_amount
 
-    # Trade 1: A -> B
     base1, quote1 = symbols[0].split('/')
-    if path[0] == quote1: # Buying base currency (e.g., USDT -> BTC in BTC/USDT)
+    if path[0] == quote1:
         amount_b = amount_a / ticker1['ask']
-    else: # Selling base currency (e.g., BTC -> USDT in BTC/USDT)
+    else:
         amount_b = amount_a * ticker1['bid']
 
-    # Trade 2: B -> C
     base2, quote2 = symbols[1].split('/')
     if path[1] == quote2:
         amount_c = amount_b / ticker2['ask']
     else:
         amount_c = amount_b * ticker2['bid']
 
-    # Trade 3: C -> A
     base3, quote3 = symbols[2].split('/')
     if path[2] == quote3:
         final_amount_a = amount_c / ticker3['ask']

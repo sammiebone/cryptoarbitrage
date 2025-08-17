@@ -1,10 +1,21 @@
 # Automated Crypto Arbitrage Service Configuration
 
 exchanges:
+  # The mock exchange is useful for testing the bot's logic without real funds.
+  mock:
+    enabled: true
+    api_key: "mock_key"
+    api_secret: "mock_secret"
+
+  # Real exchanges are skipped due to placeholder keys.
+  # To enable, set enabled to true and replace the keys.
   binance:
+    enabled: false
     api_key: "YOUR_BINANCE_API_KEY"
     api_secret: "YOUR_BINANCE_API_SECRET"
+
   kraken:
+    enabled: false
     api_key: "YOUR_KRAKEN_API_KEY"
     api_secret: "YOUR_KRAKEN_API_SECRET"
 

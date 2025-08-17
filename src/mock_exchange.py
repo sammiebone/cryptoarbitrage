@@ -116,3 +116,7 @@ class MockExchange(Exchange):
 
     def get_balance(self, currency: str) -> float:
         return self._balances.get(currency, 0.0)
+
+    def get_symbols(self) -> list[str]:
+        """Returns the list of symbols available in the mock market data."""
+        return list(self._market_data.keys())
