@@ -8,3 +8,8 @@ pytest
 aiohttp
 asyncio
 websockets
+cryptography
+Flask-Login
+Werkzeug
+pyotp
+qrcode

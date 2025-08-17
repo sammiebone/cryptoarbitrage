@@ -22,12 +22,5 @@ slippage_pct: 0.05 # Assumed slippage for dry runs
 # Database settings
 database_url: "sqlite:///trades.db"
 
-# API keys for real exchanges (replace with your keys)
-# Make sure to keep these secret and do not commit them to version control
-api_keys:
-  binance:
-    apiKey: YOUR_API_KEY
-    secret: YOUR_SECRET_KEY
-  coinbasepro:
-    apiKey: YOUR_API_KEY
-    secret: YOUR_SECRET_KEY
+# API keys for real exchanges are now loaded from environment variables.
+# See SECURITY.md for instructions on how to set them.

@@ -29,13 +29,20 @@ class ArbitrageBot:
 
     def _initialize_exchanges(self):
         exchanges = {}
-        api_keys = self.config.get("api_keys", {})
+        import os
         for name in self.config["exchanges"]:
             if "mock" in name:
                 exchanges[name] = MockExchange(name, self.assets)
             else:
-                keys = api_keys.get(name, {})
-                exchanges[name] = CEXExchange(name, keys.get("apiKey"), keys.get("secret"))
+                # Load API keys from environment variables
+                # Convention: {EXCHANGE_NAME}_API_KEY and {EXCHANGE_NAME}_SECRET
+                api_key = os.environ.get(f"{name.upper()}_API_KEY")
+                secret = os.environ.get(f"{name.upper()}_SECRET")
+
+                if not api_key or not secret:
+                    self.log(f"API key/secret for {name} not found in environment variables. Running in public mode.", level="warning")
+
+                exchanges[name] = CEXExchange(name, api_key, secret)
         return exchanges
 
     def set_log_queue(self, log_queue):
