@@ -4,6 +4,7 @@ import threading
 import os
 from flask import Flask, jsonify, request, send_from_directory
 from flask_socketio import SocketIO, emit
+from flask_sqlalchemy import SQLAlchemy
 
 from src.bot import ArbitrageBot
 from src.log_handler import setup_logging
@@ -12,7 +13,14 @@ from src.log_handler import setup_logging
 # The static_folder points to the build of the React app.
 app = Flask(__name__, static_folder='frontend/public')
 app.config['SECRET_KEY'] = 'secret-key-for-production'
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL') or \
+    'sqlite:///' + os.path.join(app.instance_path, 'app.db')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 socketio = SocketIO(app, async_mode='eventlet')
+
+# Import and initialize DB after app is created to avoid circular imports
+from .models import db
+db.init_app(app)
 
 # --- Global Bot Instance & Logging ---
 log_queue = queue.Queue()
@@ -69,6 +77,16 @@ def serve(path):
         return send_from_directory(app.static_folder, 'index.html')
 
 if __name__ == '__main__':
+    # Ensure the instance folder exists
+    try:
+        os.makedirs(app.instance_path)
+    except OSError:
+        pass
+
+    # Create the database and tables if they don't exist
+    with app.app_context():
+        db.create_all()
+
     emitter = threading.Thread(target=log_emitter_thread, args=(log_queue,), daemon=True)
     emitter.start()
 

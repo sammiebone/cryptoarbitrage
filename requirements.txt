@@ -7,4 +7,5 @@ python-dotenv>=1.0
 Flask>=2.0
 Flask-SocketIO>=5.0
 eventlet>=0.33
+Flask-SQLAlchemy>=3.0
 # Dependencies will be listed here.
