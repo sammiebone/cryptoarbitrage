@@ -78,3 +78,13 @@ This software has not yet undergone a professional, third-party security audit o
 ---
 
 By running this software, you acknowledge that you understand these security principles and accept responsibility for the secure configuration and operation of the bot.
+
+## 6. Regulatory Compliance
+
+While the bot has been designed with security in mind, you must also be aware of the regulatory landscape.
+
+- **KYC/AML**: Know Your Customer (KYC) and Anti-Money Laundering (AML) checks are performed by the exchanges you use, not by this software. You must ensure that your accounts on all connected exchanges are fully verified and in good standing before using this bot.
+
+- **Local Laws**: You are responsible for researching and complying with the laws in your jurisdiction regarding automated trading and cryptocurrencies.
+
+- **Terms of Service**: Always read and understand the Terms of Service for each exchange you connect. Some exchanges may have specific rules or restrictions regarding API usage and automated trading.
