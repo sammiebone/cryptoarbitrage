@@ -25,7 +25,17 @@ db.init_app(app)
 # --- Global Bot Instance & Logging ---
 log_queue = queue.Queue()
 setup_logging(log_queue)
-bot = ArbitrageBot()
+
+def new_trade_callback(trade_data):
+    """Callback function to emit new trade data via WebSocket."""
+    logging.info(f"New trade recorded: {trade_data['symbol']}. Emitting to dashboard.")
+    socketio.emit('new_trade', trade_data)
+    # Also push a performance update
+    with app.app_context():
+        summary = bot.get_performance_summary()
+        socketio.emit('performance_update', summary)
+
+bot = ArbitrageBot(on_new_trade=new_trade_callback)
 
 def log_emitter_thread(log_queue: queue.Queue):
     """A background thread that emits logs to the dashboard via WebSocket."""
@@ -55,6 +65,19 @@ def stop_bot():
 @app.route('/api/status', methods=['GET'])
 def get_bot_status():
     return jsonify({"status": bot.get_status()})
+
+@app.route('/api/trade_history', methods=['GET'])
+def trade_history():
+    """Returns a list of recent trades from the database."""
+    limit = request.args.get('limit', 50, type=int)
+    trades = bot.get_trade_history(limit=limit)
+    return jsonify(trades)
+
+@app.route('/api/performance', methods=['GET'])
+def performance_metrics():
+    """Returns a summary of performance metrics."""
+    summary = bot.get_performance_summary()
+    return jsonify(summary)
 
 # --- WebSocket Events ---
 @socketio.on('connect')

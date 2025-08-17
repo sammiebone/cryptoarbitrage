@@ -1,5 +1,8 @@
 import logging
 from typing import Dict, Optional
+from dashboard.app import app, db
+from dashboard.models import Trade
+import datetime
 
 from .exchange_abc import Exchange
 
@@ -7,7 +10,8 @@ def execute_arbitrage(
     opportunity: Dict,
     exchanges_for_trade: Dict[str, Optional[Exchange]],
     config: Dict,
-    trade_size: float
+    trade_size: float,
+    on_new_trade=None
 ):
     """
     Routes an arbitrage opportunity to the correct execution function.
@@ -28,16 +32,16 @@ def execute_arbitrage(
         if not exchange:
             logging.error(f"[Execution] ERROR: No valid exchange object for triangular arbitrage.")
             return
-        _execute_triangular_arbitrage(opportunity, exchange, config, trade_size, mode_prefix)
+        _execute_triangular_arbitrage(opportunity, exchange, config, trade_size, mode_prefix, on_new_trade)
 
     elif opp_type == 'direct':
-        _execute_direct_arbitrage(opportunity, exchanges_for_trade, config, trade_size, mode_prefix)
+        _execute_direct_arbitrage(opportunity, exchanges_for_trade, config, trade_size, mode_prefix, on_new_trade)
 
     else:
         logging.error(f"[Execution] ERROR: Unknown opportunity type '{opp_type}'.")
 
 
-def _execute_direct_arbitrage(opportunity, exchanges, config, trade_size, mode_prefix):
+def _execute_direct_arbitrage(opportunity, exchanges, config, trade_size, mode_prefix, on_new_trade=None):
     """Helper function for direct arbitrage execution."""
     buy_exchange = exchanges.get('buy')
     sell_exchange = exchanges.get('sell')
@@ -87,12 +91,43 @@ def _execute_direct_arbitrage(opportunity, exchanges, config, trade_size, mode_p
     except Exception as e:
         logging.critical(f"{mode_prefix} CRITICAL FAILURE: The BUY order was filled on {buy_exchange.name}, but the SELL order failed on {sell_exchange.name}: {e}.")
         logging.critical(f"{mode_prefix} URGENT: You are now holding an unhedged position of {amount_to_sell} {base_currency} on {buy_exchange.name}.")
+        # Record the failed trade
+        with app.app_context():
+            trade = Trade(
+                trade_type='direct',
+                symbol=symbol,
+                buy_exchange=buy_exchange.name,
+                sell_exchange=sell_exchange.name,
+                trade_size_quote=trade_size,
+                profit_amount=0, # Or calculate loss if possible
+                profit_percentage=0,
+                status=f"failed_leg_2: {e}"
+            )
+            db.session.add(trade)
+            db.session.commit()
         return
 
     logging.info(f"{mode_prefix} Successfully submitted both legs of the direct arbitrage.")
+    # Record the successful trade
+    with app.app_context():
+        profit_amount = trade_size * (opportunity['profit_percentage'] / 100)
+        trade = Trade(
+            trade_type='direct',
+            symbol=symbol,
+            buy_exchange=buy_exchange.name,
+            sell_exchange=sell_exchange.name,
+            trade_size_quote=trade_size,
+            profit_amount=profit_amount,
+            profit_percentage=opportunity['profit_percentage'],
+            status="completed"
+        )
+        db.session.add(trade)
+        db.session.commit()
+        if on_new_trade:
+            on_new_trade(trade.to_dict())
 
 
-def _execute_triangular_arbitrage(opportunity, exchange, config, trade_size, mode_prefix):
+def _execute_triangular_arbitrage(opportunity, exchange, config, trade_size, mode_prefix, on_new_trade=None):
     """Helper function to contain the logic for triangular arbitrage execution."""
     start_currency = opportunity['path'].split(' -> ')[0]
     logging.info(f"{mode_prefix} Executing: {opportunity['path']} on {exchange.name} with {trade_size:.4f} {start_currency}")
@@ -132,6 +167,20 @@ def _execute_triangular_arbitrage(opportunity, exchange, config, trade_size, mod
                     current_amount = amount_to_trade * order_result.get('price', price)
             except Exception as e:
                 logging.error(f"{mode_prefix} FAILED: Could not execute trade for leg {i+1}. Aborting path. Reason: {e}")
+                with app.app_context():
+                    trade = Trade(
+                        trade_type='triangular',
+                        symbol=opportunity['symbols'][0], # Just use the first symbol as representative
+                        exchange=exchange.name,
+                        trade_size_quote=trade_size,
+                        profit_amount=0,
+                        profit_percentage=0,
+                        status=f"failed_leg_{i+1}: {e}"
+                    )
+                    db.session.add(trade)
+                    db.session.commit()
+                    if on_new_trade:
+                        on_new_trade(trade.to_dict())
                 return
         else:
             if side == 'buy':
@@ -140,3 +189,17 @@ def _execute_triangular_arbitrage(opportunity, exchange, config, trade_size, mod
                 current_amount = amount_to_trade * price
 
     logging.info(f"{mode_prefix} Successfully simulated all legs of the triangular path.")
+    # Record the successful trade
+    with app.app_context():
+        profit_amount = trade_size * (opportunity['profit_percentage'] / 100)
+        trade = Trade(
+            trade_type='triangular',
+            symbol=opportunity['symbols'][0],
+            exchange=exchange.name,
+            trade_size_quote=trade_size,
+            profit_amount=profit_amount,
+            profit_percentage=opportunity['profit_percentage'],
+            status="completed"
+        )
+        db.session.add(trade)
+        db.session.commit()
