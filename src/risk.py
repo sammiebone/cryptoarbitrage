@@ -1,127 +1,107 @@
+import logging
 from typing import Dict, Tuple, List, Optional
 
 from .exchange_abc import Exchange
 from .utils import calculate_effective_price, InsufficientLiquidityError
 
+def _check_slippage(exchange: Exchange, symbol: str, side: str, amount_to_trade: float, config: dict) -> Optional[float]:
+    """Checks if the slippage for a trade is within the acceptable limit."""
+    try:
+        order_book = exchange.get_order_book(symbol)
+        ticker = exchange.get_ticker(symbol)
 
-def _calculate_net_profit(opportunity: Dict, exchanges: List[Exchange], trade_size: float) -> Optional[float]:
+        # Determine the ticker price to compare against
+        ticker_price = ticker['ask'] if side == 'buy' else ticker['bid']
+        if not ticker_price:
+            logging.warning(f"[RiskManager] Could not get ticker price for {symbol} on {exchange.name}.")
+            return None
+
+        effective_price = calculate_effective_price(order_book, side, amount_to_trade)
+
+        slippage = abs(effective_price / ticker_price - 1) * 100
+        max_slippage = config.get('risk', {}).get('max_slippage_percentage', 1.0)
+
+        if slippage > max_slippage:
+            logging.warning(f"[RiskManager] Slippage for {symbol} is {slippage:.2f}%, which exceeds the limit of {max_slippage}%.")
+            return None
+
+        return effective_price
+    except InsufficientLiquidityError as e:
+        logging.warning(f"[RiskManager] Insufficient liquidity for trade: {e}")
+        return None
+    except Exception as e:
+        logging.exception(f"[RiskManager] Unexpected error during slippage check for {symbol}: {e}")
+        return None
+
+def _calculate_net_profit(opportunity: Dict, exchanges: List[Exchange], trade_size: float, config: dict) -> Optional[float]:
     """
-    Calculates the final net profit of an opportunity, accounting for trading fees,
-    withdrawal fees (for direct), and slippage from the order book.
-
-    Returns:
-        The new net profit percentage, or None if the trade is not feasible.
+    Calculates the final net profit of an opportunity, accounting for all fees and slippage.
     """
     opp_type = opportunity.get('type')
 
     try:
         if opp_type == 'triangular':
-            # Logic for triangular arbitrage recalculation
             exchange = exchanges[0]
             path = opportunity['path'].split(' -> ')
             symbols = opportunity['symbols']
+            fees = [exchange.get_trading_fees(s) for s in symbols]
 
-            fees1 = exchange.get_trading_fees(symbols[0])
-            fees2 = exchange.get_trading_fees(symbols[1])
-            fees3 = exchange.get_trading_fees(symbols[2])
-
-            # Direct simulation of the trade path
             current_currency = path[0]
             current_amount = trade_size
 
-            # Leg 1
-            base, quote = symbols[0].split('/')
-            order_book = exchange.get_order_book(symbols[0])
-            if current_currency == quote: # Buy base
-                amount_to_buy = current_amount / exchange.get_ticker(symbols[0])['ask']
-                effective_price = calculate_effective_price(order_book, 'buy', amount_to_buy)
-                next_amount = (current_amount / effective_price) * (1 - fees1['taker'])
-                current_currency = base
-            else: # Sell base
-                effective_price = calculate_effective_price(order_book, 'sell', current_amount)
-                next_amount = (current_amount * effective_price) * (1 - fees1['taker'])
-                current_currency = quote
-            current_amount = next_amount
+            for i in range(3):
+                symbol = symbols[i]
+                base, quote = symbol.split('/')
+                side = 'buy' if current_currency == quote else 'sell'
 
-            # Leg 2
-            base, quote = symbols[1].split('/')
-            order_book = exchange.get_order_book(symbols[1])
-            if current_currency == quote:
-                amount_to_buy = current_amount / exchange.get_ticker(symbols[1])['ask']
-                effective_price = calculate_effective_price(order_book, 'buy', amount_to_buy)
-                next_amount = (current_amount / effective_price) * (1 - fees2['taker'])
-                current_currency = base
-            else:
-                effective_price = calculate_effective_price(order_book, 'sell', current_amount)
-                next_amount = (current_amount * effective_price) * (1 - fees2['taker'])
-                current_currency = quote
-            current_amount = next_amount
+                # Approximate amount in base currency to check slippage
+                amount_in_base = current_amount / exchange.get_ticker(symbol)['ask'] if side == 'buy' else current_amount
 
-            # Leg 3
-            base, quote = symbols[2].split('/')
-            order_book = exchange.get_order_book(symbols[2])
-            if current_currency == quote:
-                amount_to_buy = current_amount / exchange.get_ticker(symbols[2])['ask']
-                effective_price = calculate_effective_price(order_book, 'buy', amount_to_buy)
-                final_amount = (current_amount / effective_price) * (1 - fees3['taker'])
-            else:
-                effective_price = calculate_effective_price(order_book, 'sell', current_amount)
-                final_amount = (current_amount * effective_price) * (1 - fees3['taker'])
+                effective_price = _check_slippage(exchange, symbol, side, amount_in_base, config)
+                if effective_price is None: return None
 
-            return ((final_amount - trade_size) / trade_size) * 100
+                if side == 'buy':
+                    next_amount = (current_amount / effective_price) * (1 - fees[i]['taker'])
+                    current_currency = base
+                else:
+                    next_amount = (current_amount * effective_price) * (1 - fees[i]['taker'])
+                    current_currency = quote
+                current_amount = next_amount
+
+            return ((current_amount - trade_size) / trade_size) * 100
 
         elif opp_type == 'direct':
-            # Logic for direct arbitrage recalculation
-            buy_exchange_name = opportunity['buy_exchange']
-            sell_exchange_name = opportunity['sell_exchange']
+            buy_ex = next(ex for ex in exchanges if ex.name == opportunity['buy_exchange'])
+            sell_ex = next(ex for ex in exchanges if ex.name == opportunity['sell_exchange'])
             symbol = opportunity['symbol']
+            base, quote = symbol.split('/')
 
-            buy_exchange = next((ex for ex in exchanges if ex.name == buy_exchange_name), None)
-            sell_exchange = next((ex for ex in exchanges if ex.name == sell_exchange_name), None)
+            # --- Check slippage on BUY leg ---
+            amount_to_buy_base = trade_size / opportunity['buy_price']
+            buy_effective_price = _check_slippage(buy_ex, symbol, 'buy', amount_to_buy_base, config)
+            if buy_effective_price is None: return None
 
-            if not buy_exchange or not sell_exchange:
-                print(f"[RiskManager] ERROR: Could not find exchange objects for direct arbitrage.")
-                return None
+            # --- Check slippage on SELL leg ---
+            # First, calculate how much base we'd have after buying and withdrawing
+            buy_fees = buy_ex.get_trading_fees(symbol)
+            withdrawal_fee = buy_ex.get_withdrawal_fee(base)
+            if withdrawal_fee == float('inf'): return None
+            amount_bought = (trade_size / buy_effective_price) * (1 - buy_fees['taker'])
+            amount_to_sell = amount_bought - withdrawal_fee
+            if amount_to_sell <= 0: return None
 
-            # Fetch all data
-            buy_order_book = buy_exchange.get_order_book(symbol)
-            sell_order_book = sell_exchange.get_order_book(symbol)
-            buy_fees = buy_exchange.get_trading_fees(symbol)
-            sell_fees = sell_exchange.get_trading_fees(symbol)
-            base_currency, quote_currency = symbol.split('/')
-            withdrawal_fee = buy_exchange.get_withdrawal_fee(base_currency)
+            sell_effective_price = _check_slippage(sell_ex, symbol, 'sell', amount_to_sell, config)
+            if sell_effective_price is None: return None
 
-            if withdrawal_fee == float('inf'):
-                print(f"[RiskManager] FAILED: Cannot perform direct arbitrage due to unknown withdrawal fee for {base_currency} on {buy_exchange.name}.")
-                return None
+            # --- Recalculate final profit with effective prices ---
+            sell_fees = sell_ex.get_trading_fees(symbol)
+            final_amount_quote = amount_to_sell * sell_effective_price * (1 - sell_fees['taker'])
 
-            # Full simulation
-            initial_amount_quote = trade_size
+            return ((final_amount_quote - trade_size) / trade_size) * 100
 
-            # 1. Buy on buy_exchange
-            amount_to_buy_base = initial_amount_quote / opportunity['buy_price'] # Approximate amount
-            buy_effective_price = calculate_effective_price(buy_order_book, 'buy', amount_to_buy_base)
-            amount_base_bought = (initial_amount_quote / buy_effective_price) * (1 - buy_fees['taker'])
-
-            # 2. Withdraw
-            amount_base_after_withdrawal = amount_base_bought - withdrawal_fee
-            if amount_base_after_withdrawal <= 0:
-                print(f"[RiskManager] FAILED: Withdrawal fee ({withdrawal_fee} {base_currency}) is too high for the trade amount.")
-                return None
-
-            # 3. Sell on sell_exchange
-            sell_effective_price = calculate_effective_price(sell_order_book, 'sell', amount_base_after_withdrawal)
-            final_amount_quote = amount_base_after_withdrawal * sell_effective_price * (1 - sell_fees['taker'])
-
-            return ((final_amount_quote - initial_amount_quote) / initial_amount_quote) * 100
-
-    except InsufficientLiquidityError as e:
-        print(f"[RiskManager] FAILED: {e}")
-        return None
     except Exception as e:
-        print(f"[RiskManager] ERROR: Unexpected error during net profit calculation: {e}")
+        logging.exception(f"[RiskManager] Unexpected error during net profit calculation: {e}")
         return None
-
     return None
 
 
@@ -130,12 +110,7 @@ def check_trade_safety(
     exchanges: List[Exchange],
     config: Dict
 ) -> Tuple[bool, float, Dict[str, Optional[Exchange]]]:
-    """
-    Performs risk management checks for a given arbitrage opportunity.
-    Returns the trade size and a dictionary of the exchanges involved.
-    """
     min_profit = config['risk']['min_profitability_percentage']
-
     if opportunity['profit_percentage'] < min_profit:
         return False, 0.0, {}
 
@@ -144,44 +119,33 @@ def check_trade_safety(
     opp_type = opportunity.get('type')
 
     if opp_type == 'triangular':
-        exchange_name = opportunity.get('exchange')
-        exchange = next((ex for ex in exchanges if ex.name == exchange_name), None)
+        exchange = next((ex for ex in exchanges if ex.name == opportunity.get('exchange')), None)
         if not exchange: return False, 0.0, {}
-
         start_currency = opportunity['path'].split(' -> ')[0]
         balance = exchange.get_balance(start_currency)
         trade_size = balance * config['trading']['trade_size_percentage']
         exchanges_for_trade['triangular'] = exchange
 
     elif opp_type == 'direct':
-        symbol = opportunity['symbol']
-        _, quote_currency = symbol.split('/')
-        buy_exchange_name = opportunity['buy_exchange']
-        sell_exchange_name = opportunity['sell_exchange']
-
-        buy_exchange = next((ex for ex in exchanges if ex.name == buy_exchange_name), None)
-        sell_exchange = next((ex for ex in exchanges if ex.name == sell_exchange_name), None)
-
+        buy_exchange = next((ex for ex in exchanges if ex.name == opportunity['buy_exchange']), None)
+        sell_exchange = next((ex for ex in exchanges if ex.name == opportunity['sell_exchange']), None)
         if not buy_exchange or not sell_exchange: return False, 0.0, {}
 
-        # For direct arbitrage, the trade size is determined by the balance on the BUYING exchange.
+        _, quote_currency = opportunity['symbol'].split('/')
         balance = buy_exchange.get_balance(quote_currency)
         trade_size = balance * config['trading']['trade_size_percentage']
-        exchanges_for_trade['buy'] = buy_exchange
-        exchanges_for_trade['sell'] = sell_exchange
+        exchanges_for_trade.update({'buy': buy_exchange, 'sell': sell_exchange})
 
     if trade_size <= 0:
         return False, 0.0, {}
 
-    # --- Secondary validation with slippage and all fees ---
-    print(f"[RiskManager] INFO: Performing detailed validation for {opp_type} opportunity...")
-
-    net_profit = _calculate_net_profit(opportunity, exchanges, trade_size)
+    logging.info(f"[RiskManager] Performing detailed validation for {opp_type} opportunity...")
+    net_profit = _calculate_net_profit(opportunity, exchanges, trade_size, config)
 
     if net_profit is not None and net_profit > min_profit:
         opportunity['profit_percentage'] = net_profit
-        print(f"[RiskManager] PASSED: Net profit after all costs: {net_profit:.4f}%")
+        logging.info(f"[RiskManager] PASSED: Net profit after all costs: {net_profit:.4f}%")
         return True, trade_size, exchanges_for_trade
     else:
-        print(f"[RiskManager] FAILED: Opportunity not profitable after detailed check. Net profit: {net_profit or 'N/A'}")
+        logging.warning(f"[RiskManager] FAILED: Opportunity not profitable after detailed check. Net profit: {net_profit or 'N/A'}")
         return False, 0.0, {}

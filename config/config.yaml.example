@@ -27,6 +27,11 @@ trading:
   # Example: 0.1 means use up to 10% of your available USDT for a trade.
   trade_size_percentage: 0.1
 
+  # A list of specific trading pairs to monitor.
+  # If the list is empty, the bot will scan all available symbols on the exchange.
+  # Example: ["BTC/USDT", "ETH/USDT"]
+  monitored_symbols: []
+
 # Risk Management
 risk:
   # The minimum expected profit percentage to trigger a trade.
@@ -34,8 +39,19 @@ risk:
   # Example: 0.002 means a 0.2% profit is required.
   min_profitability_percentage: 0.002
 
+  # The maximum slippage allowed for a single trade. If the estimated price
+  # impact is greater than this, the trade will be aborted.
+  # Example: 1.0 means a 1.0% slippage tolerance.
+  max_slippage_percentage: 1.0
+
 # Application settings
 app:
   # Set to true to simulate trades without using real funds.
   # It is HIGHLY recommended to run in dry_run mode for a while before going live.
   dry_run: true
+  poll_interval: 5 # Time to wait between cycles, in seconds
+
+  # Select which arbitrage strategies to run.
+  strategies:
+    triangular: true
+    direct: true

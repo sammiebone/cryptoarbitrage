@@ -1,3 +1,4 @@
+import logging
 from typing import List, Dict
 
 from .exchange_abc import Exchange
@@ -17,7 +18,7 @@ def create_exchanges(config: Dict) -> List[Exchange]:
     exchanges = []
 
     if 'exchanges' not in config:
-        print("Warning: No 'exchanges' section found in the configuration.")
+        logging.warning("No 'exchanges' section found in the configuration.")
         return []
 
     for exchange_id, ex_config in config['exchanges'].items():
@@ -26,16 +27,16 @@ def create_exchanges(config: Dict) -> List[Exchange]:
         enabled = ex_config.get('enabled', True)
 
         if not enabled:
-            print(f"Skipping '{exchange_id}' as it is disabled in the config.")
+            logging.info(f"Skipping '{exchange_id}' as it is disabled in the config.")
             continue
 
         # For non-mock exchanges, check for placeholder credentials
         if exchange_id != 'mock' and (not api_key or 'YOUR_' in api_key or not api_secret or 'YOUR_' in api_secret):
-            print(f"Skipping '{exchange_id}' due to missing or placeholder credentials.")
+            logging.warning(f"Skipping '{exchange_id}' due to missing or placeholder credentials.")
             continue
 
         try:
-            print(f"Initializing exchange: {exchange_id}")
+            logging.info(f"Initializing exchange: {exchange_id}")
             if exchange_id == 'mock':
                 # Mock exchange doesn't need real keys, but we can pass them for consistency
                 exchange_instance = MockExchange(api_key=api_key or "mock_key", api_secret=api_secret or "mock_secret")
@@ -47,12 +48,12 @@ def create_exchanges(config: Dict) -> List[Exchange]:
                 )
             exchanges.append(exchange_instance)
         except ValueError as e:
-            print(f"Error initializing exchange '{exchange_id}': {e}")
+            logging.error(f"Error initializing exchange '{exchange_id}': {e}")
         except Exception as e:
-            print(f"An unexpected error occurred while initializing '{exchange_id}': {e}")
+            logging.exception(f"An unexpected error occurred while initializing '{exchange_id}': {e}")
 
     if not exchanges:
-        print("\nWarning: No valid exchanges were initialized. The bot may not function.")
-        print("Please check your `config.yaml` to ensure at least one exchange is enabled and has valid credentials.")
+        logging.warning("No valid exchanges were initialized. The bot may not function.")
+        logging.warning("Please check your `config.yaml` to ensure at least one exchange is enabled and has valid credentials.")
 
     return exchanges

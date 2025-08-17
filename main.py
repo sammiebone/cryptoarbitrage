@@ -35,7 +35,7 @@ def run(config_path):
             print("\n" + "="*50)
             print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Searching for new opportunities...")
 
-            opportunities = find_all_opportunities(exchanges)
+            opportunities = find_all_opportunities(exchanges, config)
 
             if opportunities:
                 print(f"\nFound {len(opportunities)} total opportunities. Evaluating...")

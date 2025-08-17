@@ -23,9 +23,20 @@ trading:
   base_currency: "USDT"
   trade_size_percentage: 0.1
 
+  # A list of specific trading pairs to monitor. If empty, all are scanned.
+  monitored_symbols: []
+
 risk:
   min_profitability_percentage: 0.002 # 0.2%
+
+  # The maximum slippage allowed for a single trade.
+  max_slippage_percentage: 1.0
 
 app:
   dry_run: true
   poll_interval: 5 # Time to wait between cycles, in seconds
+
+  # Select which arbitrage strategies to run.
+  strategies:
+    triangular: true
+    direct: true

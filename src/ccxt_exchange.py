@@ -1,4 +1,5 @@
 import ccxt
+import logging
 from typing import Dict, Optional
 
 from .exchange_abc import Exchange
@@ -49,7 +50,7 @@ class CcxtExchange(Exchange):
                 'timestamp': ticker.get('timestamp'),
             }
         except ccxt.Error as e:
-            print(f"[{self.name}] Error fetching ticker for {symbol}: {e}")
+            logging.error(f"[{self.name}] Error fetching ticker for {symbol}: {e}")
             raise
 
     def get_order_book(self, symbol: str) -> Dict:
@@ -60,7 +61,7 @@ class CcxtExchange(Exchange):
             order_book = self.exchange.fetch_order_book(symbol)
             return order_book
         except ccxt.Error as e:
-            print(f"[{self.name}] Error fetching order book for {symbol}: {e}")
+            logging.error(f"[{self.name}] Error fetching order book for {symbol}: {e}")
             raise
 
     def create_order(self, symbol: str, order_type: str, side: str, amount: float, price: Optional[float] = None) -> Dict:
@@ -71,7 +72,7 @@ class CcxtExchange(Exchange):
             order = self.exchange.create_order(symbol, order_type, side, amount, price)
             return order
         except ccxt.Error as e:
-            print(f"[{self.name}] Error creating order for {symbol}: {e}")
+            logging.error(f"[{self.name}] Error creating order for {symbol}: {e}")
             raise
 
     def get_balance(self, currency: str) -> float:
@@ -83,7 +84,7 @@ class CcxtExchange(Exchange):
             balances = self.exchange.fetch_balance()
             return balances.get(currency, {}).get('free', 0.0)
         except ccxt.Error as e:
-            print(f"[{self.name}] Error fetching balance for {currency}: {e}")
+            logging.error(f"[{self.name}] Error fetching balance for {currency}: {e}")
             raise
 
     def get_symbols(self) -> list[str]:
@@ -96,7 +97,7 @@ class CcxtExchange(Exchange):
                 self.exchange.load_markets()
             return self.exchange.symbols
         except ccxt.Error as e:
-            print(f"[{self.name}] Error fetching symbols: {e}")
+            logging.error(f"[{self.name}] Error fetching symbols: {e}")
             raise
 
     def get_trading_fees(self, symbol: str) -> Dict[str, float]:
@@ -114,7 +115,7 @@ class CcxtExchange(Exchange):
                 "taker": market.get('taker', 0.002)
             }
         except ccxt.Error as e:
-            print(f"[{self.name}] Error fetching trading fees for {symbol}, using default. Error: {e}")
+            logging.warning(f"[{self.name}] Error fetching trading fees for {symbol}, using default. Error: {e}")
             return {"maker": 0.002, "taker": 0.002}
 
     def get_withdrawal_fee(self, currency: str) -> float:
@@ -126,7 +127,7 @@ class CcxtExchange(Exchange):
             return self._fees_cache['withdrawal_fees'].get(currency, float('inf'))
 
         try:
-            print(f"[{self.name}] Fetching all exchange fees (this may be slow)...")
+            logging.info(f"[{self.name}] Fetching all exchange fees (this may be slow)...")
             all_fees = self.exchange.fetch_fees()
             self._fees_cache['withdrawal_fees'] = {}
 
@@ -137,7 +138,7 @@ class CcxtExchange(Exchange):
             return self._fees_cache['withdrawal_fees'].get(currency, float('inf'))
 
         except (ccxt.NotSupported, ccxt.NetworkError):
-            print(f"[{self.name}] WARNING: Exchange does not support fetching withdrawal fees. Assuming high cost.")
+            logging.warning(f"[{self.name}] Exchange does not support fetching withdrawal fees. Assuming high cost.")
             # Cache the fact that it's not supported
             self._fees_cache['withdrawal_fees'] = {}
             return float('inf')

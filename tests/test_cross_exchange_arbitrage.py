@@ -65,14 +65,21 @@ def exchanges_no_opportunity():
 
 from src.risk import _calculate_net_profit
 
-def test_direct_arbitrage_profit_calculation_is_correct(exchanges_with_direct_opportunity):
+@pytest.fixture
+def mock_config():
+    """Provides a default mock config for tests."""
+    return {
+        'risk': {'max_slippage_percentage': 1.0},
+        'trading': {'monitored_symbols': []}
+    }
+
+def test_direct_arbitrage_profit_calculation_is_correct(exchanges_with_direct_opportunity, mock_config):
     """
     Tests that the net profit calculation for direct arbitrage is correct,
     including trading and withdrawal fees.
     """
     exchanges = exchanges_with_direct_opportunity
 
-    # Manually create the opportunity dict that the finder would create
     opportunity = {
         "type": "direct",
         "symbol": "BTC/USDT",
@@ -82,20 +89,17 @@ def test_direct_arbitrage_profit_calculation_is_correct(exchanges_with_direct_op
         "sell_price": 50000.0,
     }
 
-    # Assume a realistic trade size
     trade_size = 10000.0 # in USDT
 
-    # Calculate the net profit using the real calculation function
-    net_profit = _calculate_net_profit(opportunity, exchanges, trade_size)
+    net_profit = _calculate_net_profit(opportunity, exchanges, trade_size, mock_config)
 
     # Manual calculation confirmed that the code's output of ~1.5870 is correct.
-    # The previous manual calculation was slightly off.
     assert net_profit == pytest.approx(1.5870, abs=1e-4)
 
-def test_no_direct_arbitrage_when_unprofitable(exchanges_no_opportunity):
+def test_no_direct_arbitrage_when_unprofitable(exchanges_no_opportunity, mock_config):
     """
     Tests that no direct arbitrage is found when prices are efficient.
     """
-    opportunities = find_direct_arbitrage(exchanges_no_opportunity)
+    opportunities = find_direct_arbitrage(exchanges_no_opportunity, mock_config)
 
     assert not opportunities, "Should not find an opportunity with unprofitable prices."
