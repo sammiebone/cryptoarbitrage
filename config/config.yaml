@@ -1,42 +1,32 @@
-# Automated Crypto Arbitrage Service Configuration
+# Configuration for the crypto arbitrage bot
 
+# Exchanges to use for arbitrage
 exchanges:
-  # The mock exchange is useful for testing the bot's logic without real funds.
-  mock:
-    enabled: true
-    api_key: "mock_key"
-    api_secret: "mock_secret"
+  - mock_exchange_1
+  - mock_exchange_2
 
-  # Real exchanges are skipped due to placeholder keys.
-  # To enable, set enabled to true and replace the keys.
+# Assets to trade
+assets:
+  - BTC
+  - ETH
+  - USD
+
+# Risk management settings
+min_profitability_pct: 0.1 # Minimum profitability to execute a trade
+max_trade_size_usd: 100 # Maximum trade size in USD
+
+# Slippage settings
+slippage_pct: 0.05 # Assumed slippage for dry runs
+
+# Database settings
+database_url: "sqlite:///trades.db"
+
+# API keys for real exchanges (replace with your keys)
+# Make sure to keep these secret and do not commit them to version control
+api_keys:
   binance:
-    enabled: false
-    api_key: "YOUR_BINANCE_API_KEY"
-    api_secret: "YOUR_BINANCE_API_SECRET"
-
-  kraken:
-    enabled: false
-    api_key: "YOUR_KRAKEN_API_KEY"
-    api_secret: "YOUR_KRAKEN_API_SECRET"
-
-trading:
-  base_currency: "USDT"
-  trade_size_percentage: 0.1
-
-  # A list of specific trading pairs to monitor. If empty, all are scanned.
-  monitored_symbols: []
-
-risk:
-  min_profitability_percentage: 0.002 # 0.2%
-
-  # The maximum slippage allowed for a single trade.
-  max_slippage_percentage: 1.0
-
-app:
-  dry_run: true
-  poll_interval: 5 # Time to wait between cycles, in seconds
-
-  # Select which arbitrage strategies to run.
-  strategies:
-    triangular: true
-    direct: true
+    apiKey: YOUR_API_KEY
+    secret: YOUR_SECRET_KEY
+  coinbasepro:
+    apiKey: YOUR_API_KEY
+    secret: YOUR_SECRET_KEY

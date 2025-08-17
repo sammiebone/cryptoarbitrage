@@ -1,137 +1,86 @@
-import time
-from typing import Dict, Optional
-
+import asyncio
+import random
+from datetime import datetime
 from .exchange_abc import Exchange
 
-# Pre-defined, simplified market data for a triangular arbitrage opportunity.
-# BTC/USDT: buy BTC with USDT
-# ETH/BTC: buy ETH with BTC
-# ETH/USDT: sell ETH for USDT
-#
-# Opportunity: USDT -> BTC -> ETH -> USDT
-# 1. Buy BTC with USDT: Price = 50000 USDT for 1 BTC
-# 2. Buy ETH with BTC: Price = 0.05 BTC for 1 ETH
-# 3. Sell ETH for USDT: Price = 2550 USDT for 1 ETH
-#
-# Path:
-# Start with 2550 USDT.
-# Buy 1 ETH for 2550 USDT (using ETH/USDT market in reverse).
-# In a real scenario, we'd buy BTC first.
-# Let's start with 50000 USDT.
-# Buy 1 BTC for 50000 USDT.
-# Use 1 BTC to buy 20 ETH (1 / 0.05).
-# Sell 20 ETH for 20 * 2550 = 51000 USDT.
-# Profit = 51000 - 50000 = 1000 USDT.
-MOCK_MARKET_DATA = {
-    "BTC/USDT": {
-        "bids": [[49995.0, 0.5], [49990.0, 1.0]],  # Price, Amount
-        "asks": [[50000.0, 0.5], [50005.0, 1.0]],
-    },
-    "ETH/BTC": {
-        "bids": [[0.0499, 10.0], [0.0498, 20.0]],
-        "asks": [[0.0500, 10.0], [0.0501, 20.0]],
-    },
-    "ETH/USDT": {
-        "bids": [[2545.0, 5.0], [2540.0, 10.0]],
-        "asks": [[2550.0, 5.0], [2555.0, 10.0]],
-    },
-}
-
 class MockExchange(Exchange):
-    """
-    A mock exchange implementation for testing and development.
-    It simulates an exchange's behavior without making real API calls.
-    """
+    def __init__(self, name, assets):
+        super().__init__(name)
+        self._balance = {asset: 1000.0 for asset in assets}
+        self._order_books = {}
+        self._fees = {'maker': 0.001, 'taker': 0.001} # 0.1% fee
 
-    def __init__(self, api_key: str = "mock_key", api_secret: str = "mock_secret"):
-        super().__init__(api_key, api_secret)
-        self._balances = {"USDT": 100000.0, "BTC": 5.0, "ETH": 100.0}
-        self._market_data = MOCK_MARKET_DATA
+    async def get_ticker(self, symbol):
+        await asyncio.sleep(0.01) # Simulate network latency
+        base_price = self._get_base_price(symbol)
+        bid = base_price * (1 - 0.0005 * random.random())
+        ask = base_price * (1 + 0.0005 * random.random())
+        return {'symbol': symbol, 'bid': bid, 'ask': ask, 'last': (bid + ask) / 2}
 
-    def get_ticker(self, symbol: str) -> Dict:
-        if symbol not in self._market_data:
-            raise ValueError(f"Symbol '{symbol}' not found on {self.name}")
+    async def get_order_book(self, symbol, limit=100):
+        await asyncio.sleep(0.01)
+        if symbol not in self._order_books:
+            self._generate_order_book(symbol)
+        return self._order_books[symbol]
 
-        order_book = self._market_data[symbol]
-        best_ask = order_book["asks"][0][0]
-        best_bid = order_book["bids"][0][0]
+    async def get_fees(self):
+        await asyncio.sleep(0.01)
+        return self._fees
+
+    async def execute_trade(self, symbol, trade_type, amount, price):
+        await asyncio.sleep(0.01)
+        base_asset, quote_asset = symbol.split('/')
+
+        if trade_type == 'buy':
+            if self._balance[quote_asset] < amount * price:
+                raise ValueError("Insufficient funds")
+            self._balance[quote_asset] -= amount * price
+            self._balance[base_asset] += amount * (1 - self._fees['taker'])
+        elif trade_type == 'sell':
+            if self._balance[base_asset] < amount:
+                raise ValueError("Insufficient funds")
+            self._balance[base_asset] -= amount
+            self._balance[quote_asset] += amount * price * (1 - self._fees['taker'])
 
         return {
-            "symbol": symbol,
-            "ask": best_ask,
-            "bid": best_bid,
-            "last": (best_ask + best_bid) / 2, # A simplified last price
-            "timestamp": int(time.time() * 1000),
+            'id': str(random.randint(10000, 99999)),
+            'datetime': datetime.utcnow().isoformat(),
+            'symbol': symbol,
+            'type': trade_type,
+            'amount': amount,
+            'price': price,
+            'fee': {
+                'cost': amount * price * self._fees['taker'],
+                'currency': quote_asset
+            }
         }
 
-    def get_order_book(self, symbol: str) -> Dict:
-        if symbol not in self._market_data:
-            raise ValueError(f"Symbol '{symbol}' not found on {self.name}")
-        return self._market_data[symbol]
+    async def get_balance(self, asset):
+        await asyncio.sleep(0.01)
+        return self._balance.get(asset, 0.0)
 
-    def create_order(self, symbol: str, order_type: str, side: str, amount: float, price: Optional[float] = None) -> Dict:
-        print(
-            f"[{self.name}] INFO: Simulating creating order: "
-            f"{side.upper()} {amount} {symbol} at {'market price' if order_type == 'market' else f'price {price}'}"
-        )
+    async def close(self):
+        # No persistent connection to close for the mock exchange
+        pass
 
-        if symbol not in self._market_data:
-            raise ValueError(f"Symbol '{symbol}' not found on {self.name}")
+    def _get_base_price(self, symbol):
+        # Simple deterministic prices for testing
+        if 'BTC' in symbol:
+            return 50000.0
+        if 'ETH' in symbol:
+            return 4000.0
+        return 1.0
 
-        base_currency, quote_currency = symbol.split('/')
+    def _generate_order_book(self, symbol):
+        base_price = self._get_base_price(symbol)
+        bids = []
+        asks = []
+        for i in range(100):
+            # Bids are below the base price
+            bid_price = base_price * (1 - (i + 1) * 0.0001 * random.random())
+            bids.append([bid_price, random.uniform(0.1, 5)])
+            # Asks are above the base price
+            ask_price = base_price * (1 + (i + 1) * 0.0001 * random.random())
+            asks.append([ask_price, random.uniform(0.1, 5)])
 
-        # For simplicity, we'll assume market orders execute at the best price
-        effective_price = price
-        if order_type == 'market':
-            if side == 'buy':
-                effective_price = self._market_data[symbol]['asks'][0][0]
-            else: # sell
-                effective_price = self._market_data[symbol]['bids'][0][0]
-
-        trade_value = amount * effective_price
-
-        # Update balances
-        if side == 'buy':
-            if self._balances[quote_currency] < trade_value:
-                raise ValueError("Insufficient funds")
-            self._balances[quote_currency] -= trade_value
-            self._balances[base_currency] += amount
-        else: # sell
-            if self._balances[base_currency] < amount:
-                raise ValueError("Insufficient funds")
-            self._balances[base_currency] -= amount
-            self._balances[quote_currency] += trade_value
-
-        print(f"[{self.name}] INFO: Order filled. New balances: {self._balances}")
-
-        return {
-            "id": str(int(time.time() * 1000)),
-            "symbol": symbol,
-            "type": order_type,
-            "side": side,
-            "amount": amount,
-            "price": effective_price,
-            "status": "closed",
-        }
-
-    def get_balance(self, currency: str) -> float:
-        return self._balances.get(currency, 0.0)
-
-    def get_symbols(self) -> list[str]:
-        """Returns the list of symbols available in the mock market data."""
-        return list(self._market_data.keys())
-
-    def get_trading_fees(self, symbol: str) -> Dict[str, float]:
-        """Returns a default, fixed trading fee for the mock exchange."""
-        # Suppress the unused 'symbol' argument warning
-        _ = symbol
-        return {"maker": 0.001, "taker": 0.001} # 0.1%
-
-    def get_withdrawal_fee(self, currency: str) -> float:
-        """Returns a default, fixed withdrawal fee for a given currency."""
-        mock_withdrawal_fees = {
-            "BTC": 0.0005,
-            "ETH": 0.005,
-            "USDT": 1.0,
-        }
-        return mock_withdrawal_fees.get(currency, 0.0)
+        self._order_books[symbol] = {'bids': sorted(bids, key=lambda x: x[0], reverse=True), 'asks': sorted(asks, key=lambda x: x[0])}
