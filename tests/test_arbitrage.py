@@ -25,10 +25,10 @@ def test_find_triangular_arbitrage_identifies_opportunity(mock_exchange):
     usdt_path_found = any(opp['path'] == 'USDT -> BTC -> ETH -> USDT' for opp in opportunities)
     assert usdt_path_found, "The specific USDT->BTC->ETH->USDT path was not found."
 
-def test_profit_calculation_is_correct(mock_exchange):
+def test_profit_calculation_is_correct_after_fees(mock_exchange):
     """
     Tests the internal _calculate_path_profitability function directly
-    to ensure its calculation is accurate for the known opportunity.
+    to ensure its calculation is accurate for the known opportunity, including fees.
     """
     # The known profitable path
     path = ['USDT', 'BTC', 'ETH', 'USDT']
@@ -37,11 +37,8 @@ def test_profit_calculation_is_correct(mock_exchange):
     profit_percentage = _calculate_path_profitability(mock_exchange, path, symbols)
 
     assert profit_percentage is not None
-    # We expect a profit of 1.8% from our mock data
-    # 10000 USDT -> 0.2 BTC -> 4 ETH -> 10180 USDT. Profit = 180. (180/10000)*100 = 1.8%
-    # The calculation is actually (10180 - 10000) / 10000 = 0.018 * 100 = 1.8
-    # My previous run showed 1.8000000000000016
-    assert profit_percentage == pytest.approx(1.8)
+    # Gross profit is ~1.8%. With 3x 0.1% taker fees, the net profit is ~1.49%
+    assert profit_percentage == pytest.approx(1.4949, abs=1e-4)
 
 def test_no_opportunity_if_prices_are_unfavorable(mock_exchange):
     """

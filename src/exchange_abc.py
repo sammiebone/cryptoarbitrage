@@ -80,3 +80,29 @@ class Exchange(ABC):
             A list of strings, where each string is a symbol (e.g., 'BTC/USDT').
         """
         pass
+
+    @abstractmethod
+    def get_trading_fees(self, symbol: str) -> Dict[str, float]:
+        """
+        Retrieves the trading fees for a given market symbol.
+
+        Args:
+            symbol: The trading pair symbol (e.g., 'BTC/USDT').
+
+        Returns:
+            A dictionary containing 'maker' and 'taker' fee rates (e.g., {'maker': 0.001, 'taker': 0.001}).
+        """
+        pass
+
+    @abstractmethod
+    def get_withdrawal_fee(self, currency: str) -> float:
+        """
+        Retrieves the withdrawal fee for a given currency.
+
+        Args:
+            currency: The currency symbol (e.g., 'USDT', 'BTC').
+
+        Returns:
+            The withdrawal fee as a float in the currency's units.
+        """
+        pass

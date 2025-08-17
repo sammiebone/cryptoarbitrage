@@ -33,6 +33,7 @@ class CcxtExchange(Exchange):
             },
         })
         self.name = self.exchange.name
+        self._fees_cache = {} # Cache for withdrawal fees
 
     def get_ticker(self, symbol: str) -> Dict:
         """
@@ -97,3 +98,46 @@ class CcxtExchange(Exchange):
         except ccxt.Error as e:
             print(f"[{self.name}] Error fetching symbols: {e}")
             raise
+
+    def get_trading_fees(self, symbol: str) -> Dict[str, float]:
+        """
+        Retrieves the trading fees for a given market symbol using ccxt.
+        """
+        try:
+            if not self.exchange.markets:
+                self.exchange.load_markets()
+
+            market = self.exchange.market(symbol)
+
+            return {
+                "maker": market.get('maker', 0.002), # Default to 0.2% if not provided
+                "taker": market.get('taker', 0.002)
+            }
+        except ccxt.Error as e:
+            print(f"[{self.name}] Error fetching trading fees for {symbol}, using default. Error: {e}")
+            return {"maker": 0.002, "taker": 0.002}
+
+    def get_withdrawal_fee(self, currency: str) -> float:
+        """
+        Retrieves the withdrawal fee for a given currency.
+        Caches the results to avoid repeated API calls.
+        """
+        if 'withdrawal_fees' in self._fees_cache:
+            return self._fees_cache['withdrawal_fees'].get(currency, float('inf'))
+
+        try:
+            print(f"[{self.name}] Fetching all exchange fees (this may be slow)...")
+            all_fees = self.exchange.fetch_fees()
+            self._fees_cache['withdrawal_fees'] = {}
+
+            if 'withdraw' in all_fees:
+                for code, fee in all_fees['withdraw'].items():
+                    self._fees_cache['withdrawal_fees'][code] = float(fee)
+
+            return self._fees_cache['withdrawal_fees'].get(currency, float('inf'))
+
+        except (ccxt.NotSupported, ccxt.NetworkError):
+            print(f"[{self.name}] WARNING: Exchange does not support fetching withdrawal fees. Assuming high cost.")
+            # Cache the fact that it's not supported
+            self._fees_cache['withdrawal_fees'] = {}
+            return float('inf')

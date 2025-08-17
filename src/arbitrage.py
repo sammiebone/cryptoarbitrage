@@ -74,22 +74,23 @@ def find_direct_arbitrage(exchanges: List[Exchange]) -> List[Dict]:
         if buy_exchange.name == sell_exchange.name:
             continue
 
+        # This is now a gross profitability check. The detailed calculation will happen in the risk manager.
         if sell_price > buy_price:
-            profit_percentage = ((sell_price / buy_price) - 1) * 100
+            gross_profit_percentage = ((sell_price / buy_price) - 1) * 100
 
-            # TODO: Incorporate trading and transfer fees for accurate profit calculation.
-            if profit_percentage > 0:
+            # We only pass on opportunities that have a chance of being profitable after fees.
+            # A threshold of 0% is fine, the risk manager will do the real check.
+            if gross_profit_percentage > 0:
                 opportunity = {
                     "type": "direct",
                     "symbol": symbol,
-                    "profit_percentage": profit_percentage,
+                    "profit_percentage": gross_profit_percentage, # This is a gross, preliminary profit
                     "buy_exchange": buy_exchange.name,
                     "sell_exchange": sell_exchange.name,
                     "buy_price": buy_price,
                     "sell_price": sell_price,
                 }
                 opportunities.append(opportunity)
-                print(f"Found direct opportunity: {opportunity}")
 
     return opportunities
 
@@ -152,36 +153,48 @@ def _structure_markets(symbols: List[str]) -> Dict[str, Dict[str, str]]:
 
 def _calculate_path_profitability(exchange: Exchange, path: List[str], symbols: List[str]) -> Optional[float]:
     """
-    Calculates the profitability of a given arbitrage path.
+    Calculates the net profitability of a given arbitrage path, including fees.
     """
     try:
         ticker1 = exchange.get_ticker(symbols[0])
         ticker2 = exchange.get_ticker(symbols[1])
         ticker3 = exchange.get_ticker(symbols[2])
+
+        fees1 = exchange.get_trading_fees(symbols[0])
+        fees2 = exchange.get_trading_fees(symbols[1])
+        fees3 = exchange.get_trading_fees(symbols[2])
     except Exception as e:
-        print(f"Could not fetch tickers for path {path}: {e}")
+        print(f"Could not fetch tickers or fees for path {path}: {e}")
         return None
 
     initial_amount = 1.0
     amount_a = initial_amount
 
-    base1, quote1 = symbols[0].split('/')
-    if path[0] == quote1:
-        amount_b = amount_a / ticker1['ask']
-    else:
-        amount_b = amount_a * ticker1['bid']
+    # Assume taker fees for all trades
+    taker_fee1 = fees1['taker']
+    taker_fee2 = fees2['taker']
+    taker_fee3 = fees3['taker']
 
+    # Trade 1: A -> B
+    base1, quote1 = symbols[0].split('/')
+    if path[0] == quote1: # Buying base currency
+        amount_b = (amount_a / ticker1['ask']) * (1 - taker_fee1)
+    else: # Selling base currency
+        amount_b = (amount_a * ticker1['bid']) * (1 - taker_fee1)
+
+    # Trade 2: B -> C
     base2, quote2 = symbols[1].split('/')
     if path[1] == quote2:
-        amount_c = amount_b / ticker2['ask']
+        amount_c = (amount_b / ticker2['ask']) * (1 - taker_fee2)
     else:
-        amount_c = amount_b * ticker2['bid']
+        amount_c = (amount_b * ticker2['bid']) * (1 - taker_fee2)
 
+    # Trade 3: C -> A
     base3, quote3 = symbols[2].split('/')
     if path[2] == quote3:
-        final_amount_a = amount_c / ticker3['ask']
+        final_amount_a = (amount_c / ticker3['ask']) * (1 - taker_fee3)
     else:
-        final_amount_a = amount_c * ticker3['bid']
+        final_amount_a = (amount_c * ticker3['bid']) * (1 - taker_fee3)
 
-    profit = ((final_amount_a - initial_amount) / initial_amount) * 100
-    return profit
+    profit_percentage = ((final_amount_a - initial_amount) / initial_amount) * 100
+    return profit_percentage

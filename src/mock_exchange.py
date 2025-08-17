@@ -120,3 +120,18 @@ class MockExchange(Exchange):
     def get_symbols(self) -> list[str]:
         """Returns the list of symbols available in the mock market data."""
         return list(self._market_data.keys())
+
+    def get_trading_fees(self, symbol: str) -> Dict[str, float]:
+        """Returns a default, fixed trading fee for the mock exchange."""
+        # Suppress the unused 'symbol' argument warning
+        _ = symbol
+        return {"maker": 0.001, "taker": 0.001} # 0.1%
+
+    def get_withdrawal_fee(self, currency: str) -> float:
+        """Returns a default, fixed withdrawal fee for a given currency."""
+        mock_withdrawal_fees = {
+            "BTC": 0.0005,
+            "ETH": 0.005,
+            "USDT": 1.0,
+        }
+        return mock_withdrawal_fees.get(currency, 0.0)
